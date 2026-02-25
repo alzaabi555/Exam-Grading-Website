@@ -12,8 +12,8 @@ import { toast } from 'sonner';
 // مكتبات الـ PDF
 import { Document, Page, pdfjs } from 'react-pdf';
 import { PDFDocument, rgb } from 'pdf-lib'; // <-- المكتبة السحرية الجديدة
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
