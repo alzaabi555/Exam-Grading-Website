@@ -3,12 +3,12 @@ name: Build and Release EXE
 on:
   push:
     tags:
-      - 'v*' # سيبدأ العمل فقط عندما ترفع "Tag" يبدأ بحرف v مثل v1.0.0
-  workflow_dispatch: # يسمح لك بتشغيل البناء يدوياً من صفحة Actions
+      - 'v*' # سيبدأ العمل عند رفع Tag مثل v1.0.0
+  workflow_dispatch: # للتشغيل اليدوي
 
 jobs:
   release:
-    runs-on: windows-latest # البناء يجب أن يتم على نظام ويندوز لإنتاج EXE
+    runs-on: windows-latest
 
     steps:
       - name: Checkout Code
@@ -18,18 +18,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          # تم حذف سطر cache هنا لتجنب خطأ Lock file
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
       - name: Build React App
         run: npm run build
+        env:
+          CI: false # لمنع توقف البناء في حال وجود تحذيرات بسيطة في الكود
 
       - name: Build Electron App (EXE)
         run: npx electron-builder --win --publish always
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # مفتاح سري تلقائي من جيت هوب للرفع
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
