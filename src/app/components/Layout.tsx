@@ -3,12 +3,19 @@ import { Navigation } from './Navigation';
 
 export function Layout() {
   return (
-    // أضفت dir="rtl" لضمان أن الخلفية وتوزيع العناصر يبدأ من اليمين
-    <div className="min-h-screen bg-gray-50" dir="rtl">
+    // استخدام flex لتقسيم الشاشة بأكملها
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans" dir="rtl">
+      
+      {/* الشريط الجانبي الثابت */}
       <Navigation />
-      <main>
-        <Outlet />
+      
+      {/* مساحة المحتوى الرئيسية (ديناميكية وقابلة للتمرير الداخلي) */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="p-4 md:p-8 min-h-full">
+          <Outlet />
+        </div>
       </main>
+      
     </div>
   );
 }
