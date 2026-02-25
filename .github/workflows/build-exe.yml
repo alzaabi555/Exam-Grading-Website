@@ -14,23 +14,25 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8 # نسخة مستقرة تتماشى مع Node 20
+      # هذه الخطوة الجراحية ستقوم بحذف أي ملف إعدادات مخفي قد يسبب خطأ 403
+      - name: Remove local .npmrc (If exists)
+        run: Remove-Item -Path .npmrc -ErrorAction SilentlyContinue
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
+          # إجبار السيرفر على استخدام المكتبة العامة المجانية مباشرة
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install Dependencies
-        # خيار --no-frozen-lockfile يحل مشكلة ملف القفل المفقود أو المحذوف
-        run: pnpm install --no-frozen-lockfile
+        # تفريغ أي مفاتيح سرية عالقة وتثبيت المكتبات بصمت
+        run: npm install --legacy-peer-deps --no-audit
+        env:
+          NODE_AUTH_TOKEN: ""
 
       - name: Build React App
-        run: pnpm run build
+        run: npm run build
         env:
           CI: false
 
