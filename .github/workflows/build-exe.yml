@@ -6,6 +6,11 @@ on:
       - 'v*'
   workflow_dispatch: # هذه هي الكلمة السحرية التي ستسمح لك بتشغيله بضغطة زر
 
+# --- الإضافة السحرية التي ستسمح برفع الملف ---
+permissions:
+  contents: write
+# ---------------------------------------------
+
 jobs:
   release:
     runs-on: windows-latest
