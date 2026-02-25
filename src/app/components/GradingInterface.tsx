@@ -1,347 +1,199 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { ChevronLeft, ChevronRight, Save, CheckCircle } from 'lucide-react';
+import { Save, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
-import { Label } from './ui/label';
-import { Progress } from './ui/progress';
-import { KeyboardShortcuts, KeyboardShortcutsHelp } from './KeyboardShortcuts';
-import { getPapers, updatePaper, saveGradingSession, getGradingSession } from '../utils/storage';
-import { ExamPaper, AnswerPart } from '../types/exam';
+import { Badge } from './ui/badge';
+import { getPapers } from '../utils/storage';
+import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
 
 export function GradingInterface() {
   const navigate = useNavigate();
-  const [papers, setPapers] = useState<ExamPaper[]>([]);
-  const [currentPaperIndex, setCurrentPaperIndex] = useState(0);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [currentPartIndex, setCurrentPartIndex] = useState(0);
-  const [scoringDialogOpen, setScoringDialogOpen] = useState(false);
-  const [currentPart, setCurrentPart] = useState<AnswerPart | null>(null);
+  const [currentPaper, setCurrentPaper] = useState<ExamPaper | null>(null);
+  const [scores, setScores] = useState<Record<string, number>>({});
 
+  // تحميل أول ورقة تحتاج للتصحيح عند فتح الصفحة
   useEffect(() => {
-    loadPapers();
-    const session = getGradingSession();
-    if (session) {
-      const paperIdx = papers.findIndex(p => p.id === session.currentPaperId);
-      if (paperIdx !== -1) {
-        setCurrentPaperIndex(paperIdx);
-        setCurrentQuestionIndex(session.currentQuestionIndex);
-        setCurrentPartIndex(session.currentPartIndex);
-      }
-    }
+    loadNextPaper();
   }, []);
 
-  const loadPapers = () => {
-    const allPapers = getPapers();
-    const gradingPapers = allPapers.filter(p => p.status !== 'completed');
-    setPapers(gradingPapers);
+  const loadNextPaper = () => {
+    const papers = getPapers();
+    // نبحث عن أول ورقة قيد الانتظار أو جاري العمل عليها
+    const pendingPaper = papers.find(p => p.status !== 'completed');
+    if (pendingPaper) {
+      setCurrentPaper(pendingPaper);
+      setScores({}); // تصفير العداد للورقة الجديدة
+    } else {
+      setCurrentPaper(null);
+    }
   };
 
-  const currentPaper = papers[currentPaperIndex];
-  const currentQuestion = currentPaper?.questions[currentQuestionIndex];
-  const currentAnswerPart = currentQuestion?.parts[currentPartIndex];
-
-  const handleScore = (score: number) => {
-    if (!currentPaper || !currentQuestion || !currentAnswerPart) return;
-
-    const updatedPaper = { ...currentPaper };
-    updatedPaper.questions[currentQuestionIndex].parts[currentPartIndex].score = score;
+  const handleScoreChange = (partId: string, value: string, maxScore: number) => {
+    let numValue = parseFloat(value);
     
-    let totalScore = 0;
-    let allGraded = true;
-
-    updatedPaper.questions.forEach(q => {
-      q.parts.forEach(p => {
-        if (p.score !== undefined) {
-          totalScore += p.score;
-        } else {
-          allGraded = false;
-        }
-      });
-    });
-
-    updatedPaper.totalScore = totalScore;
-    updatedPaper.status = allGraded ? 'completed' : 'in-progress';
-    
-    if (allGraded) {
-      updatedPaper.gradedDate = new Date().toISOString();
+    // منع إدخال قيم فارغة أو حروف
+    if (isNaN(numValue)) {
+      const newScores = { ...scores };
+      delete newScores[partId];
+      setScores(newScores);
+      return;
     }
 
-    updatePaper(currentPaper.id, updatedPaper);
-    loadPapers();
-    setScoringDialogOpen(false);
-    toast.success(`تم رصد الدرجة: ${score}/${currentAnswerPart.maxScore}`);
+    // منع تجاوز الدرجة القصوى أو إدخال قيمة سالبة
+    if (numValue > maxScore) numValue = maxScore;
+    if (numValue < 0) numValue = 0;
 
-    handleNext();
+    setScores(prev => ({ ...prev, [partId]: numValue }));
   };
 
-  const handleNext = () => {
+  const calculateTotal = () => {
+    return Object.values(scores).reduce((sum, score) => sum + score, 0);
+  };
+
+  const saveProgress = (isComplete: boolean = false) => {
     if (!currentPaper) return;
 
-    let nextPaperIndex = currentPaperIndex;
-    let nextQuestionIndex = currentQuestionIndex;
-    let nextPartIndex = currentPartIndex + 1;
+    const papers = getPapers();
+    const paperIndex = papers.findIndex(p => p.id === currentPaper.id);
 
-    if (nextPartIndex >= currentQuestion.parts.length) {
-      nextPartIndex = 0;
-      nextQuestionIndex += 1;
+    if (paperIndex !== -1) {
+      const totalScore = calculateTotal();
+      
+      papers[paperIndex] = {
+        ...currentPaper,
+        totalScore,
+        status: isComplete ? 'completed' : 'in-progress',
+        gradedDate: isComplete ? new Date().toISOString() : undefined,
+      };
 
-      if (nextQuestionIndex >= currentPaper.questions.length) {
-        nextQuestionIndex = 0;
-        nextPaperIndex += 1;
+      localStorage.setItem('fastGrader_papers', JSON.stringify(papers));
 
-        if (nextPaperIndex >= papers.length) {
-          toast.success('تم تصحيح جميع الأوراق!');
-          navigate('/dashboard');
-          return;
-        }
+      if (isComplete) {
+        toast.success('تم إنهاء التصحيح! جارٍ تحميل الورقة التالية...');
+        loadNextPaper(); // الانتقال التلقائي للورقة التالية لتسريع العمل
+      } else {
+        toast.success('تم حفظ التقدم مؤقتاً.');
       }
     }
-
-    setCurrentPaperIndex(nextPaperIndex);
-    setCurrentQuestionIndex(nextQuestionIndex);
-    setCurrentPartIndex(nextPartIndex);
-
-    saveGradingSession({
-      currentPaperId: papers[nextPaperIndex]?.id,
-      currentQuestionIndex: nextQuestionIndex,
-      currentPartIndex: nextPartIndex,
-    });
   };
 
-  const handlePrevious = () => {
-    if (!currentPaper) return;
-
-    let prevPaperIndex = currentPaperIndex;
-    let prevQuestionIndex = currentQuestionIndex;
-    let prevPartIndex = currentPartIndex - 1;
-
-    if (prevPartIndex < 0) {
-      prevQuestionIndex -= 1;
-
-      if (prevQuestionIndex < 0) {
-        prevPaperIndex -= 1;
-
-        if (prevPaperIndex < 0) {
-          toast.error('أنت بالفعل في أول إجابة');
-          return;
-        }
-
-        const prevPaper = papers[prevPaperIndex];
-        prevQuestionIndex = prevPaper.questions.length - 1;
-      }
-
-      const prevQuestion = papers[prevPaperIndex].questions[prevQuestionIndex];
-      prevPartIndex = prevQuestion.parts.length - 1;
-    }
-
-    setCurrentPaperIndex(prevPaperIndex);
-    setCurrentQuestionIndex(prevQuestionIndex);
-    setCurrentPartIndex(prevPartIndex);
-
-    saveGradingSession({
-      currentPaperId: papers[prevPaperIndex]?.id,
-      currentQuestionIndex: prevQuestionIndex,
-      currentPartIndex: prevPartIndex,
-    });
-  };
-
-  const openScoringDialog = () => {
-    setCurrentPart(currentAnswerPart);
-    setScoringDialogOpen(true);
-  };
-
-  const getProgress = () => {
-    if (!currentPaper) return 0;
-    let totalParts = 0;
-    let gradedParts = 0;
-
-    currentPaper.questions.forEach(q => {
-      q.parts.forEach(p => {
-        totalParts++;
-        if (p.score !== undefined) gradedParts++;
-      });
-    });
-
-    return totalParts > 0 ? (gradedParts / totalParts) * 100 : 0;
-  };
-
-  if (!currentPaper || !currentQuestion || !currentAnswerPart) {
+  // شاشة النجاح عند الانتهاء من كل الأوراق
+  if (!currentPaper) {
     return (
-      <div className="container mx-auto p-6 max-w-6xl text-right" dir="rtl">
-        <Card>
-          <CardContent className="p-12 text-center">
-            <h2 className="text-2xl mb-4 text-bold">لا توجد أوراق للتصحيح</h2>
-            <p className="text-gray-600 mb-6">قم برفع أوراق الاختبار لتبدأ عملية التصحيح</p>
-            <Button onClick={() => navigate('/')}>رفع الأوراق</Button>
-          </CardContent>
-        </Card>
+      <div className="flex flex-col items-center justify-center h-[80vh] text-center space-y-4" dir="rtl">
+        <CheckCircle className="w-24 h-24 text-green-500 mb-4" />
+        <h2 className="text-4xl font-bold text-slate-800">لا توجد أوراق بانتظار التصحيح!</h2>
+        <p className="text-lg text-slate-500">لقد قمت بتصحيح جميع الأوراق المرفوعة بنجاح. عمل رائع يا أستاذ!</p>
+        <Button onClick={() => navigate('/dashboard')} size="lg" className="mt-4">
+          العودة للوحة التحكم
+        </Button>
       </div>
     );
   }
 
-  const scoreOptions = Array.from({ length: currentAnswerPart.maxScore + 1 }, (_, i) => i);
-
   return (
-    <div className="container mx-auto p-6 max-w-6xl text-right" dir="rtl">
-      <KeyboardShortcuts
-        onScoreShortcut={handleScore}
-        onNext={handleNext}
-        onPrevious={handlePrevious}
-        maxScore={currentAnswerPart?.maxScore}
-      />
+    <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-slate-100" dir="rtl">
       
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold mb-1">واجهة التصحيح</h1>
-            <p className="text-gray-600">
-              الورقة {currentPaperIndex + 1} من {papers.length} - {currentPaper.studentName} ({currentPaper.studentId})
-            </p>
+      {/* --- العمود الأيمن: لوحة التصحيح ورصد الدرجات --- */}
+      <div className="w-[380px] min-w-[350px] bg-white border-l shadow-2xl flex flex-col z-10">
+        
+        {/* معلومات الطالب (مثبتة بالأعلى) */}
+        <div className="p-4 border-b bg-blue-50/50">
+          <div className="flex justify-between items-center mb-3">
+            <Badge className="bg-blue-600 text-sm px-3 py-1">
+              {currentPaper.studentName}
+            </Badge>
+            <Badge variant="outline" className="bg-white text-slate-600">
+              رقم: {currentPaper.studentId}
+            </Badge>
           </div>
-          <Button variant="outline" onClick={() => navigate('/dashboard')}>
-            لوحة التحكم
-          </Button>
+          <h2 className="font-bold text-slate-800 truncate" title={currentPaper.examName}>
+            {currentPaper.examName}
+          </h2>
         </div>
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span>تقدم تصحيح الورقة</span>
-            <span>{Math.round(getProgress())}%</span>
+
+        {/* قائمة الأسئلة (قابلة للتمرير) */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
+          {currentPaper.questions.map((question, qIdx) => (
+            <Card key={question.id} className="border-blue-100 shadow-sm overflow-hidden">
+              <CardHeader className="py-2 bg-slate-50 border-b">
+                <CardTitle className="text-sm font-bold text-slate-700 flex justify-between items-center">
+                  <span>السؤال {question.questionNumber}</span>
+                  <span className="text-xs font-normal text-slate-500">{question.totalMaxScore} درجات</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 space-y-3 bg-white">
+                {question.parts.map((part, pIdx) => (
+                  <div key={part.id} className="flex items-center justify-between">
+                    <Label className="text-sm font-medium text-slate-600">الجزء {part.partNumber}</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="0"
+                        max={part.maxScore}
+                        step="0.5"
+                        className="w-20 text-center font-bold text-lg border-blue-200 focus-visible:ring-blue-500"
+                        value={scores[part.id] ?? ''}
+                        onChange={(e) => handleScoreChange(part.id, e.target.value, part.maxScore)}
+                        placeholder="-"
+                        autoFocus={qIdx === 0 && pIdx === 0} // التركيز التلقائي لبدء الكتابة فوراً
+                      />
+                      <span className="text-slate-400 text-sm w-8 text-left">/ {part.maxScore}</span>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* شريط الأزرار والمجموع (مثبت بالأسفل) */}
+        <div className="p-4 border-t bg-slate-50 space-y-4">
+          <div className="flex justify-between items-center bg-white p-3 rounded-lg border font-bold text-lg shadow-sm">
+            <span className="text-slate-600">المجموع الكلي:</span>
+            <span className={calculateTotal() >= (currentPaper.totalMaxScore / 2) ? "text-green-600 text-2xl" : "text-red-600 text-2xl"}>
+              {calculateTotal()} <span className="text-sm text-slate-400">/ {currentPaper.totalMaxScore}</span>
+            </span>
           </div>
-          <Progress value={getProgress()} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ملف الـ PDF */}
-        <Card>
-          <CardHeader>
-            <CardTitle>ورقة الاختبار - {currentPaper.examName}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-gray-100 rounded-lg p-8 text-center min-h-96 flex items-center justify-center">
-              <div className="text-gray-500">
-                <p className="mb-2 text-lg font-medium">معاين ملف PDF</p>
-                <p className="text-sm">معرف الورقة: {currentPaper.id}</p>
-                <p className="text-sm text-gray-400 mt-4 italic">
-                  في النسخة الفعلية، سيتم عرض ملف الـ PDF هنا باستخدام react-pdf
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* صورة الإجابة */}
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              السؤال {currentQuestion.questionNumber}، الجزء {currentAnswerPart.partNumber}
-            </CardTitle>
-            <p className="text-sm text-gray-600">
-              الدرجة القصوى: {currentAnswerPart.maxScore} | 
-              الدرجة الحالية: {currentAnswerPart.score !== undefined ? currentAnswerPart.score : 'لم تصحح بعد'}
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-gray-100 rounded-lg p-4 min-h-96 flex items-center justify-center mb-4 border-2 border-dashed border-gray-200">
-              {currentAnswerPart.imageUrl.startsWith('blob:') ? (
-                <img
-                  src={currentAnswerPart.imageUrl}
-                  alt={`سؤال ${currentQuestion.questionNumber} جزء ${currentAnswerPart.partNumber}`}
-                  className="max-w-full max-h-96 rounded shadow-md"
-                />
-              ) : (
-                <div className="text-center text-gray-500">
-                  <p className="mb-2 text-lg font-medium">معاينة صورة الإجابة</p>
-                  <p className="text-sm">معرف الجزء: {currentAnswerPart.id}</p>
-                  <p className="text-sm text-gray-400 mt-4 italic">
-                    نموذج إجابة للتوضيح
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={openScoringDialog}
-                className="flex-1"
-                size="lg"
-              >
-                <Save className="w-4 h-4 ml-2" />
-                {currentAnswerPart.score !== undefined ? 'تعديل الدرجة' : 'إضافة درجة'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* التنقل */}
-      <Card className="mt-6">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <Button
-              variant="outline"
-              onClick={handlePrevious}
-              disabled={currentPaperIndex === 0 && currentQuestionIndex === 0 && currentPartIndex === 0}
-            >
-              <ChevronRight className="w-4 h-4 ml-2" />
-              السابق
+          <div className="flex gap-2">
+            <Button onClick={() => saveProgress(false)} variant="outline" className="flex-1 bg-white hover:bg-slate-100 h-12">
+              <Save className="w-5 h-5 ml-2 text-slate-500" />
+              حفظ مؤقت
             </Button>
-
-            <div className="text-center">
-              <p className="font-medium">
-                السؤال {currentQuestion.questionNumber} من {currentPaper.questions.length}
-              </p>
-              <p className="text-sm text-gray-500">
-                الجزء {currentPartIndex + 1} من {currentQuestion.parts.length}
-              </p>
-            </div>
-
-            <Button onClick={handleNext}>
-              التالي
-              <ChevronLeft className="w-4 h-4 mr-2" />
+            <Button onClick={() => saveProgress(true)} className="flex-1 bg-green-600 hover:bg-green-700 h-12 text-md">
+              <CheckCircle className="w-5 h-5 ml-2" />
+              إنهاء وتالي
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* نافذة رصد الدرجات */}
-      <Dialog open={scoringDialogOpen} onOpenChange={setScoringDialogOpen}>
-        <DialogContent>
-          <DialogHeader className="text-right">
-            <DialogTitle>
-              رصد درجة السؤال {currentQuestion.questionNumber}، الجزء {currentAnswerPart.partNumber}
-            </DialogTitle>
-            <DialogDescription>
-              اختر الدرجة المناسبة لهذا الجزء (من 0 إلى {currentAnswerPart.maxScore})
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid grid-cols-4 gap-3 py-4" dir="ltr"> {/* ترك الأرقام LTR لسهولة قراءة الترتيب */}
-            {scoreOptions.map(score => (
-              <Button
-                key={score}
-                onClick={() => handleScore(score)}
-                variant={currentAnswerPart.score === score ? 'default' : 'outline'}
-                className="h-16 text-xl font-bold"
-              >
-                {score}
-              </Button>
-            ))}
-          </div>
-
-          <div className="text-sm text-gray-500 text-center italic">
-            اضغط على الرقم لرصد الدرجة مباشرة
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* مساعدة اختصارات لوحة المفاتيح */}
-      <div className="mt-6">
-        <KeyboardShortcutsHelp />
+        </div>
       </div>
+
+      {/* --- العمود الأيسر: عارض الـ PDF --- */}
+      <div className="flex-1 p-4 h-full bg-slate-200 flex flex-col">
+        <div className="w-full h-full bg-white rounded-xl shadow-inner overflow-hidden flex flex-col border border-slate-300">
+          <div className="p-2 bg-slate-800 text-slate-200 text-sm flex justify-between items-center">
+            <span className="font-medium">معاينة الورقة الأصلية</span>
+            <span className="text-xs opacity-70">استخدم عجلة الماوس للتكبير (Ctrl + Scroll)</span>
+          </div>
+          
+          {currentPaper.pdfUrl ? (
+            <iframe
+              src={`${currentPaper.pdfUrl}#toolbar=0&navpanes=0&view=FitH`} 
+              className="w-full h-full border-0"
+              title="عارض ورقة الاختبار"
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center flex-col text-slate-400 bg-slate-50">
+              <AlertCircle className="w-16 h-16 mb-4 opacity-30" />
+              <p className="text-lg">لا يوجد ملف PDF مرتبط بهذه الورقة</p>
+            </div>
+          )}
+        </div>
+      </div>
+
     </div>
   );
 }
