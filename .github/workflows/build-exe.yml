@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+  workflow_dispatch: # هذه هي الكلمة السحرية التي ستسمح لك بتشغيله بضغطة زر
 
 jobs:
   release:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # هذه الخطوة الجراحية ستقوم بحذف أي ملف إعدادات مخفي قد يسبب خطأ 403
+      # تنظيف بيئة جيت هوب من أي إعدادات تسبب خطأ 403
       - name: Remove local .npmrc (If exists)
         run: Remove-Item -Path .npmrc -ErrorAction SilentlyContinue
 
@@ -22,12 +22,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # إجبار السيرفر على استخدام المكتبة العامة المجانية مباشرة
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install Dependencies
-        # تفريغ أي مفاتيح سرية عالقة وتثبيت المكتبات بصمت
-        run: npm install --legacy-peer-deps --no-audit
+        run: npm install --legacy-peer-deps --no-audit --no-fund
         env:
           NODE_AUTH_TOKEN: ""
 
