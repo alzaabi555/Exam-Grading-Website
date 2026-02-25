@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { Save, CheckCircle, AlertCircle, Check, X, PenTool, Type, Trash2 } from 'lucide-react';
+import { Save, CheckCircle, AlertCircle, Check, X, Type, Trash2, Target } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -9,24 +9,22 @@ import { getPapers } from '../utils/storage';
 import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
 
-// استيراد مكتبة عرض الـ PDF التفاعلية
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
-// تهيئة محرك الـ PDF ليعمل مع Vite بسلاسة
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,
 ).toString();
 
-// واجهة العلامات (Annotations)
 interface Annotation {
   id: string;
   x: number;
   y: number;
   type: 'check' | 'cross' | 'score';
   value?: string;
+  partId?: string; // لربط العلامة بالسؤال المحدد
 }
 
 export function GradingInterface() {
@@ -34,12 +32,14 @@ export function GradingInterface() {
   const [currentPaper, setCurrentPaper] = useState<ExamPaper | null>(null);
   const [scores, setScores] = useState<Record<string, number>>({});
   
-  // حالات الـ PDF التفاعلي
   const [numPages, setNumPages] = useState<number>(1);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [activeTool, setActiveTool] = useState<'check' | 'cross' | 'score' | null>(null);
+  const [activeTool, setActiveTool] = useState<'check' | 'cross' | 'score'>('check'); // الافتراضي 'صح'
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
+
+  // --- السحر الجديد: تتبع الجزء النشط حالياً ---
+  const [activePartId, setActivePartId] = useState<string | null>(null);
 
   useEffect(() => {
     loadNextPaper();
@@ -51,10 +51,28 @@ export function GradingInterface() {
     if (pendingPaper) {
       setCurrentPaper(pendingPaper);
       setScores({});
-      setAnnotations([]); // تفريغ العلامات للورقة الجديدة
+      setAnnotations([]);
       setCurrentPage(1);
+      // تنشيط أول جزء في أول سؤال تلقائياً
+      if (pendingPaper.questions.length > 0 && pendingPaper.questions[0].parts.length > 0) {
+        setActivePartId(pendingPaper.questions[0].parts[0].id);
+      }
     } else {
       setCurrentPaper(null);
+    }
+  };
+
+  // دالة القفز التلقائي للسؤال التالي
+  const advanceToNextPart = (currentPartId: string) => {
+    if (!currentPaper) return;
+    const allParts = currentPaper.questions.flatMap(q => q.parts);
+    const currentIndex = allParts.findIndex(p => p.id === currentPartId);
+    
+    if (currentIndex !== -1 && currentIndex < allParts.length - 1) {
+      setActivePartId(allParts[currentIndex + 1].id);
+    } else {
+      setActivePartId(null);
+      toast.success('تم الانتهاء من جميع الأسئلة! يرجى إنهاء الورقة.');
     }
   };
 
@@ -69,6 +87,7 @@ export function GradingInterface() {
     if (numValue > maxScore) numValue = maxScore;
     if (numValue < 0) numValue = 0;
     setScores(prev => ({ ...prev, [partId]: numValue }));
+    setActivePartId(partId); // عند التعديل اليدوي، نجعله هو النشط
   };
 
   const calculateTotal = () => {
@@ -77,115 +96,150 @@ export function GradingInterface() {
 
   const saveProgress = (isComplete: boolean = false) => {
     if (!currentPaper) return;
-
     const papers = getPapers();
     const paperIndex = papers.findIndex(p => p.id === currentPaper.id);
 
     if (paperIndex !== -1) {
-      const totalScore = calculateTotal();
-      // حفظ البيانات بما فيها العلامات (Annotations)
       papers[paperIndex] = {
         ...currentPaper,
-        totalScore,
+        totalScore: calculateTotal(),
         status: isComplete ? 'completed' : 'in-progress',
         gradedDate: isComplete ? new Date().toISOString() : undefined,
-        // يمكنك لاحقاً إضافة annotations إلى نوع ExamPaper لحفظها
-        // annotations: annotations 
       };
-
       localStorage.setItem('fastGrader_papers', JSON.stringify(papers));
 
       if (isComplete) {
-        toast.success('تم إنهاء التصحيح! جارٍ تحميل الورقة التالية...');
+        toast.success('تم إنهاء التصحيح!');
         loadNextPaper();
       } else {
-        toast.success('تم حفظ التقدم والعلامات مؤقتاً.');
+        toast.success('تم الحفظ مؤقتاً.');
       }
     }
   };
 
-  // --- دوال اللوحة التفاعلية ---
+  // --- دالة التصحيح الذكية المدمجة ---
   const handlePdfClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!activeTool || !pdfWrapperRef.current) return;
+    if (!activeTool || !pdfWrapperRef.current || !currentPaper) return;
 
-    // حساب الإحداثيات كنسبة مئوية لكي تبقى دقيقة حتى لو تغير حجم الشاشة
+    if (!activePartId) {
+      toast.error('يرجى تحديد السؤال المراد تصحيحه من القائمة الجانبية');
+      return;
+    }
+
+    const allParts = currentPaper.questions.flatMap(q => q.parts);
+    const currentPart = allParts.find(p => p.id === activePartId);
+    if (!currentPart) return;
+
     const rect = pdfWrapperRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-    let value = '';
-    if (activeTool === 'score') {
-      value = prompt('أدخل الدرجة التي تريد طباعتها على الورقة:') || '';
-      if (!value.trim()) return; // إلغاء إذا لم يدخل رقماً
+    let newScore = 0;
+    let displayValue = '';
+
+    if (activeTool === 'check') {
+      newScore = currentPart.maxScore; // الدرجة الكاملة
+    } else if (activeTool === 'cross') {
+      newScore = 0; // صفر
+    } else if (activeTool === 'score') {
+      const val = prompt(`أدخل الدرجة (الحد الأقصى ${currentPart.maxScore}):`);
+      if (val === null || val.trim() === '') return;
+      newScore = parseFloat(val);
+      if (isNaN(newScore) || newScore < 0 || newScore > currentPart.maxScore) {
+        toast.error('درجة غير صالحة');
+        return;
+      }
+      displayValue = newScore.toString();
     }
 
+    // 1. تسجيل الدرجة آلياً
+    setScores(prev => ({ ...prev, [activePartId]: newScore }));
+
+    // 2. رسم الختم
     const newAnnotation: Annotation = {
       id: Date.now().toString(),
-      x,
-      y,
-      type: activeTool,
-      value
+      x, y, type: activeTool, value: displayValue, partId: activePartId
     };
-
     setAnnotations([...annotations, newAnnotation]);
+
+    // 3. القفز للسؤال التالي تلقائياً
+    advanceToNextPart(activePartId);
   };
 
+  // حذف العلامة يمسح الدرجة آلياً أيضاً
   const removeAnnotation = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // منع وضع علامة جديدة عند حذف القديمة
+    e.stopPropagation();
+    const annToRemove = annotations.find(a => a.id === id);
+    if (annToRemove && annToRemove.partId) {
+      const newScores = { ...scores };
+      delete newScores[annToRemove.partId];
+      setScores(newScores);
+      setActivePartId(annToRemove.partId); // إعادة التنشيط للسؤال المحذوف لتصحيحه مجدداً
+    }
     setAnnotations(annotations.filter(a => a.id !== id));
   };
 
-  if (!currentPaper) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[80vh] text-center space-y-4" dir="rtl">
-        <CheckCircle className="w-24 h-24 text-green-500 mb-4" />
-        <h2 className="text-4xl font-bold text-slate-800">لا توجد أوراق بانتظار التصحيح!</h2>
-        <Button onClick={() => navigate('/dashboard')} size="lg" className="mt-4">
-          العودة للوحة التحكم
-        </Button>
-      </div>
-    );
-  }
+  if (!currentPaper) return (
+    <div className="flex flex-col items-center justify-center h-[80vh] text-center space-y-4" dir="rtl">
+      <CheckCircle className="w-24 h-24 text-green-500 mb-4" />
+      <h2 className="text-4xl font-bold">لا توجد أوراق بانتظار التصحيح!</h2>
+      <Button onClick={() => navigate('/dashboard')} size="lg">العودة للوحة التحكم</Button>
+    </div>
+  );
 
   return (
     <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-slate-100" dir="rtl">
       
-      {/* --- العمود الأيمن: لوحة التصحيح ورصد الدرجات --- */}
+      {/* العمود الأيمن */}
       <div className="w-[380px] min-w-[350px] bg-white border-l shadow-2xl flex flex-col z-10">
         <div className="p-4 border-b bg-blue-50/50">
           <div className="flex justify-between items-center mb-3">
-            <Badge className="bg-blue-600 text-sm px-3 py-1">{currentPaper.studentName}</Badge>
-            <Badge variant="outline" className="bg-white text-slate-600">رقم: {currentPaper.studentId}</Badge>
+            <Badge className="bg-blue-600">{currentPaper.studentName}</Badge>
+            <Badge variant="outline">رقم: {currentPaper.studentId}</Badge>
           </div>
-          <h2 className="font-bold text-slate-800 truncate">{currentPaper.examName}</h2>
+          <h2 className="font-bold truncate">{currentPaper.examName}</h2>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
-          {currentPaper.questions.map((question, qIdx) => (
-            <Card key={question.id} className="border-blue-100 shadow-sm overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          {currentPaper.questions.map((question) => (
+            <Card key={question.id} className="shadow-sm">
               <CardHeader className="py-2 bg-slate-50 border-b">
                 <CardTitle className="text-sm font-bold flex justify-between">
                   <span>السؤال {question.questionNumber}</span>
-                  <span className="text-xs font-normal text-slate-500">{question.totalMaxScore} درجات</span>
+                  <span className="text-slate-500">{question.totalMaxScore} درجات</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-3 space-y-3 bg-white">
-                {question.parts.map((part, pIdx) => (
-                  <div key={part.id} className="flex items-center justify-between">
-                    <Label className="text-sm text-slate-600">الجزء {part.partNumber}</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        max={part.maxScore}
-                        className="w-20 text-center font-bold text-lg border-blue-200"
-                        value={scores[part.id] ?? ''}
-                        onChange={(e) => handleScoreChange(part.id, e.target.value, part.maxScore)}
-                        autoFocus={qIdx === 0 && pIdx === 0}
-                      />
-                      <span className="text-slate-400 text-sm w-8">/ {part.maxScore}</span>
+              <CardContent className="p-2 space-y-1">
+                {question.parts.map((part) => {
+                  const isActive = activePartId === part.id;
+                  return (
+                    <div 
+                      key={part.id} 
+                      onClick={() => setActivePartId(part.id)}
+                      className={`flex items-center justify-between p-2 rounded-md cursor-pointer transition-all border-2 ${
+                        isActive ? 'bg-blue-50 border-blue-400 shadow-inner' : 'border-transparent hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isActive && <Target className="w-4 h-4 text-blue-500 animate-pulse" />}
+                        <Label className={`text-sm cursor-pointer ${isActive ? 'text-blue-700 font-bold' : 'text-slate-600'}`}>
+                          الجزء {part.partNumber}
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          max={part.maxScore}
+                          className={`w-16 text-center font-bold h-8 ${isActive ? 'border-blue-400 bg-white' : 'border-slate-200'}`}
+                          value={scores[part.id] ?? ''}
+                          onChange={(e) => handleScoreChange(part.id, e.target.value, part.maxScore)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span className="text-slate-400 text-xs w-8">/ {part.maxScore}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           ))}
@@ -194,88 +248,62 @@ export function GradingInterface() {
         <div className="p-4 border-t bg-slate-50 space-y-4">
           <div className="flex justify-between p-3 bg-white rounded-lg border font-bold text-lg">
             <span>المجموع:</span>
-            <span className="text-blue-700">{calculateTotal()} <span className="text-sm text-slate-400">/ {currentPaper.totalMaxScore}</span></span>
+            <span className="text-blue-700">{calculateTotal()} / {currentPaper.totalMaxScore}</span>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => saveProgress(false)} variant="outline" className="flex-1 bg-white h-12">
-              <Save className="w-5 h-5 ml-2" /> حفظ
-            </Button>
-            <Button onClick={() => saveProgress(true)} className="flex-1 bg-green-600 hover:bg-green-700 h-12">
-              <CheckCircle className="w-5 h-5 ml-2" /> إنهاء وتالي
-            </Button>
+            <Button onClick={() => saveProgress(false)} variant="outline" className="flex-1">حفظ</Button>
+            <Button onClick={() => saveProgress(true)} className="flex-1 bg-green-600 hover:bg-green-700">إنهاء وتالي</Button>
           </div>
         </div>
       </div>
 
-      {/* --- العمود الأيسر: اللوحة التفاعلية للـ PDF --- */}
+      {/* العمود الأيسر (اللوحة التفاعلية) */}
       <div className="flex-1 p-4 h-full bg-slate-200 flex flex-col overflow-hidden">
-        
-        {/* شريط أدوات القلم الأحمر */}
         <div className="bg-white p-2 mb-2 rounded-lg shadow-sm border border-slate-300 flex items-center justify-center gap-4">
-          <span className="text-sm font-bold text-slate-500">أدوات التصحيح اليدوي:</span>
+          <span className="text-sm font-bold text-slate-500">القلم الحالي:</span>
           
           <Button 
             variant={activeTool === 'check' ? 'default' : 'outline'}
-            className={activeTool === 'check' ? 'bg-green-600 hover:bg-green-700' : 'hover:bg-green-50 hover:text-green-600'}
-            onClick={() => setActiveTool(activeTool === 'check' ? null : 'check')}
+            className={activeTool === 'check' ? 'bg-green-600' : ''}
+            onClick={() => setActiveTool('check')}
           >
-            <Check className="w-5 h-5 ml-2" /> إجابة صحيحة
+            <Check className="w-5 h-5 ml-2" /> (صح) درجة كاملة
           </Button>
 
           <Button 
             variant={activeTool === 'cross' ? 'default' : 'outline'}
-            className={activeTool === 'cross' ? 'bg-red-600 hover:bg-red-700' : 'hover:bg-red-50 hover:text-red-600'}
-            onClick={() => setActiveTool(activeTool === 'cross' ? null : 'cross')}
+            className={activeTool === 'cross' ? 'bg-red-600' : ''}
+            onClick={() => setActiveTool('cross')}
           >
-            <X className="w-5 h-5 ml-2" /> إجابة خاطئة
+            <X className="w-5 h-5 ml-2" /> (خطأ) صفر
           </Button>
 
           <Button 
             variant={activeTool === 'score' ? 'default' : 'outline'}
-            className={activeTool === 'score' ? 'bg-blue-600 hover:bg-blue-700' : 'hover:bg-blue-50 hover:text-blue-600'}
-            onClick={() => setActiveTool(activeTool === 'score' ? null : 'score')}
+            className={activeTool === 'score' ? 'bg-blue-600' : ''}
+            onClick={() => setActiveTool('score')}
           >
-            <Type className="w-5 h-5 ml-2" /> كتابة درجة
+            <Type className="w-5 h-5 ml-2" /> درجة مخصصة
           </Button>
-
-          <div className="h-8 w-px bg-slate-300 mx-2"></div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage <= 1}>السابق</Button>
-            <span className="text-sm font-medium">صفحة {currentPage} من {numPages}</span>
-            <Button variant="ghost" size="sm" onClick={() => setCurrentPage(prev => Math.min(numPages, prev + 1))} disabled={currentPage >= numPages}>التالي</Button>
-          </div>
         </div>
 
-        {/* عارض الـ PDF مع طبقة العلامات */}
-        <div className="flex-1 overflow-auto flex justify-center bg-slate-300 rounded-lg shadow-inner p-4 custom-scrollbar">
+        <div className="flex-1 overflow-auto flex justify-center bg-slate-300 rounded-lg p-4 custom-scrollbar">
           {currentPaper.pdfUrl ? (
             <div 
-              className={`relative shadow-2xl bg-white transition-all ${activeTool ? 'cursor-crosshair' : ''}`}
+              className={`relative shadow-2xl bg-white ${activeTool ? 'cursor-crosshair' : ''}`}
               ref={pdfWrapperRef}
               onClick={handlePdfClick}
             >
-              <Document
-                file={currentPaper.pdfUrl}
-                onLoadSuccess={({ numPages }) => setNumPages(numPages)}
-                loading={<div className="p-20 text-slate-500">جاري تحميل الورقة...</div>}
-              >
-                <Page 
-                  pageNumber={currentPage} 
-                  renderTextLayer={false} 
-                  renderAnnotationLayer={false}
-                  width={800} // عرض ثابت لضمان التناسق
-                />
+              <Document file={currentPaper.pdfUrl} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
+                <Page pageNumber={currentPage} renderTextLayer={false} renderAnnotationLayer={false} width={800} />
               </Document>
 
-              {/* رسم العلامات (الصح والخطأ والدرجات) */}
               {annotations.map(ann => (
                 <div 
                   key={ann.id}
                   className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group"
                   style={{ left: `${ann.x}%`, top: `${ann.y}%` }}
                   onClick={(e) => removeAnnotation(ann.id, e)}
-                  title="اضغط للحذف"
                 >
                   {ann.type === 'check' && <Check className="w-10 h-10 text-green-600 stroke-[4] drop-shadow-md" />}
                   {ann.type === 'cross' && <X className="w-10 h-10 text-red-600 stroke-[4] drop-shadow-md" />}
@@ -284,22 +312,17 @@ export function GradingInterface() {
                       {ann.value}
                     </div>
                   )}
-                  {/* زر حذف يظهر عند تمرير الماوس */}
-                  <div className="absolute -top-4 -right-4 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute -top-4 -right-4 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100">
                     <Trash2 className="w-3 h-3" />
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="m-auto text-slate-500 flex flex-col items-center">
-              <AlertCircle className="w-16 h-16 mb-4 opacity-30" />
-              <p>لا يوجد ملف PDF مرتبط بهذه الورقة</p>
-            </div>
+            <div className="m-auto text-slate-500"><AlertCircle className="w-16 h-16 opacity-30" /></div>
           )}
         </div>
       </div>
-
     </div>
   );
 }
