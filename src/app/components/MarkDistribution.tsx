@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
-import { ArrowRight, Plus, Trash2, Save } from 'lucide-react'; // استبدلت ArrowLeft بـ ArrowRight للرجوع في RTL
+import { Plus, Trash2, Save, FileEdit, CheckCircle2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { Badge } from './ui/badge';
 import { addMarkDistribution, getMarkDistributions } from '../utils/storage';
 import { MarkDistribution } from '../types/exam';
 import { toast } from 'sonner';
 
 export function MarkDistributionManager() {
-  const navigate = useNavigate();
   const [examName, setExamName] = useState('');
   const [questions, setQuestions] = useState<MarkDistribution['questions']>([]);
   const [distributions, setDistributions] = useState<MarkDistribution[]>([]);
@@ -36,7 +35,12 @@ export function MarkDistributionManager() {
   };
 
   const removeQuestion = (index: number) => {
-    setQuestions(questions.filter((_, i) => i !== index));
+    // إعادة ترقيم الأسئلة بعد الحذف للحفاظ على التسلسل
+    const updatedQuestions = questions.filter((_, i) => i !== index).map((q, i) => ({
+      ...q,
+      questionNumber: i + 1
+    }));
+    setQuestions(updatedQuestions);
   };
 
   const addPart = (questionIndex: number) => {
@@ -54,6 +58,11 @@ export function MarkDistributionManager() {
     updatedQuestions[questionIndex].parts = updatedQuestions[questionIndex].parts.filter(
       (_, i) => i !== partIndex
     );
+    // إعادة الترقيم للأجزاء
+    updatedQuestions[questionIndex].parts = updatedQuestions[questionIndex].parts.map((p, i) => ({
+      ...p,
+      partNumber: i + 1
+    }));
     setQuestions(updatedQuestions);
   };
 
@@ -79,7 +88,7 @@ export function MarkDistributionManager() {
     );
 
     if (hasInvalidScores) {
-      toast.error('يجب أن تكون جميع الدرجات أكبر من 0');
+      toast.error('يجب أن تكون جميع الدرجات أكبر من صفر (0)');
       return;
     }
 
@@ -94,16 +103,27 @@ export function MarkDistributionManager() {
     setExamName('');
     setQuestions([]);
     
-    toast.success('تم حفظ توزيع الدرجات بنجاح!');
+    toast.success('تم حفظ قالب توزيع الدرجات بنجاح!');
   };
 
   const loadTemplate = (distribution: MarkDistribution) => {
     setExamName(distribution.examName);
     setQuestions(JSON.parse(JSON.stringify(distribution.questions)));
-    toast.success('تم تحميل النموذج');
+    toast.success(`تم تحميل قالب "${distribution.examName}" للتعديل`);
   };
 
-  const getTotalMarks = (dist: MarkDistribution) => {
+  const deleteTemplate = (examNameToDelete: string) => {
+    if (confirm(`هل أنت متأكد من حذف قالب "${examNameToDelete}" نهائياً؟`)) {
+      // بما أننا لا نملك دالة مسح في storage.ts، سنقوم بتحديثها عبر localStorage مباشرة
+      const updatedDistributions = distributions.filter(d => d.examName !== examNameToDelete);
+      setDistributions(updatedDistributions);
+      // الافتراض أن هذا هو مفتاح التخزين المستخدم في storage.ts
+      localStorage.setItem('fastGrader_markDistributions', JSON.stringify(updatedDistributions));
+      toast.success('تم حذف القالب بنجاح');
+    }
+  };
+
+  const getTotalMarks = (dist: MarkDistribution | { questions: MarkDistribution['questions'] }) => {
     return dist.questions.reduce(
       (sum, q) => sum + q.parts.reduce((pSum, p) => pSum + p.maxScore, 0),
       0
@@ -111,55 +131,61 @@ export function MarkDistributionManager() {
   };
 
   return (
-    <div className="container mx-auto p-6 max-w-6xl text-right" dir="rtl">
+    <div className="text-right h-full flex flex-col" dir="rtl">
       <div className="mb-6">
-        <Button variant="ghost" onClick={() => navigate('/dashboard')} className="mb-4">
-          <ArrowRight className="w-4 h-4 ml-2" />
-          العودة للوحة التحكم
-        </Button>
-        <h1 className="text-3xl font-bold mb-2">مدير توزيع الدرجات</h1>
-        <p className="text-gray-600">تهيئة نماذج توزيع الدرجات للاختبارات</p>
+        <h1 className="text-3xl font-bold mb-2 text-slate-800">قوالب توزيع الدرجات</h1>
+        <p className="text-slate-500">قم بإعداد هياكل الاختبارات لربطها لاحقاً بالأوراق المرفوعة</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* إنشاء/تعديل التوزيع */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>إنشاء توزيع درجات</CardTitle>
-              <CardDescription>حدد توزيع الدرجات لكل سؤال وجزء</CardDescription>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 items-start">
+        
+        {/* --- العمود الأيمن: إنشاء/تعديل التوزيع (يأخذ مساحة أكبر) --- */}
+        <div className="lg:col-span-7 space-y-6">
+          <Card className="border-blue-100 shadow-md">
+            <CardHeader className="bg-blue-50/50 border-b">
+              <CardTitle className="flex items-center gap-2 text-blue-800">
+                <FileEdit className="w-5 h-5" />
+                محرر توزيع الدرجات
+              </CardTitle>
+              <CardDescription>حدد اسم الاختبار ثم أضف الأسئلة ودرجاتها بالتفصيل</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="examName">اسم الاختبار</Label>
+            <CardContent className="space-y-6 pt-6">
+              
+              {/* اسم الاختبار */}
+              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <Label htmlFor="examName" className="text-lg font-bold mb-2 block">اسم الاختبار المعتمد</Label>
                 <Input
                   id="examName"
                   value={examName}
                   onChange={(e) => setExamName(e.target.value)}
-                  placeholder="مثال: منتصف الفصل - رياضيات"
-                  className="mt-1"
+                  placeholder="مثال: منتصف الفصل - لغة عربية"
+                  className="text-lg py-6 border-blue-300 focus-visible:ring-blue-500"
                 />
               </div>
 
-              <div className="flex justify-between items-center pt-2">
-                <Label className="text-lg font-semibold">الأسئلة</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addQuestion}>
+              {/* شريط الأسئلة */}
+              <div className="flex justify-between items-center bg-slate-800 text-white p-3 rounded-lg shadow-sm">
+                <Label className="text-lg font-bold">هيكل الأسئلة</Label>
+                <Button type="button" size="sm" onClick={addQuestion} className="bg-blue-600 hover:bg-blue-500">
                   <Plus className="w-4 h-4 ml-2" />
-                  إضافة سؤال
+                  إضافة سؤال جديد
                 </Button>
               </div>
 
               {questions.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">
-                  لم يتم إضافة أسئلة بعد
+                <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-200 rounded-lg bg-slate-50">
+                  <FileEdit className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                  <p>لم يتم إضافة أي أسئلة بعد.</p>
+                  <p className="text-sm">اضغط على "إضافة سؤال جديد" للبدء.</p>
                 </div>
               ) : (
-                <div className="space-y-4 max-h-96 overflow-y-auto pl-2"> {/* pl-2 لترك مساحة لشريط التمرير */}
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                   {questions.map((question, qIndex) => (
-                    <Card key={qIndex} className="border-2">
-                      <CardHeader className="pb-3 bg-gray-50/50">
+                    <Card key={qIndex} className="border border-slate-200 shadow-sm relative overflow-hidden">
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>
+                      <CardHeader className="py-3 bg-slate-50/80 border-b">
                         <div className="flex items-center justify-between">
-                          <CardTitle className="text-base">
+                          <CardTitle className="text-md font-bold text-slate-700">
                             السؤال {question.questionNumber}
                           </CardTitle>
                           <div className="flex gap-2">
@@ -168,55 +194,61 @@ export function MarkDistributionManager() {
                               variant="outline"
                               size="sm"
                               onClick={() => addPart(qIndex)}
+                              className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50"
                             >
                               <Plus className="w-3 h-3 ml-1" />
-                              جزء
+                              إضافة جزء (فرع)
                             </Button>
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
                               onClick={() => removeQuestion(qIndex)}
+                              className="h-8 hover:bg-red-50 hover:text-red-600"
+                              title="حذف السؤال بالكامل"
                             >
-                              <Trash2 className="w-3 h-3 text-red-500" />
+                              <Trash2 className="w-4 h-4 text-red-400" />
                             </Button>
                           </div>
                         </div>
                       </CardHeader>
-                      <CardContent className="space-y-2 pt-4">
+                      <CardContent className="p-4 space-y-3 bg-white">
                         {question.parts.map((part, pIndex) => (
-                          <div key={pIndex} className="flex items-center gap-2">
-                            <Label className="w-24 text-sm">الجزء {part.partNumber}</Label>
-                            <Input
-                              type="number"
-                              min="0"
-                              value={part.maxScore || ''}
-                              onChange={(e) =>
-                                updatePartScore(qIndex, pIndex, parseInt(e.target.value) || 0)
-                              }
-                              placeholder="الدرجة"
-                              className="flex-1"
-                            />
-                            <span className="text-sm text-gray-600 w-12">درجة</span>
+                          <div key={pIndex} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-md transition-colors">
+                            <Badge variant="outline" className="w-16 justify-center bg-white">
+                              جزء {part.partNumber}
+                            </Badge>
+                            <div className="flex-1 flex items-center gap-2">
+                              <Input
+                                type="number"
+                                min="0.5"
+                                step="0.5"
+                                value={part.maxScore || ''}
+                                onChange={(e) => updatePartScore(qIndex, pIndex, parseFloat(e.target.value) || 0)}
+                                placeholder="الدرجة المخصصة"
+                                className="w-32 text-center"
+                              />
+                              <span className="text-sm text-slate-500">درجة</span>
+                            </div>
                             {question.parts.length > 1 && (
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => removePart(qIndex, pIndex)}
+                                className="text-slate-400 hover:text-red-500 hover:bg-red-50"
                               >
-                                <Trash2 className="w-3 h-3 text-red-500" />
+                                <Trash2 className="w-4 h-4" />
                               </Button>
                             )}
                           </div>
                         ))}
-                        <div className="pt-2 mt-2 border-t flex justify-between">
-                          <p className="text-sm font-bold">
-                            إجمالي السؤال:
-                          </p>
-                          <p className="text-sm font-bold">
+                        
+                        <div className="pt-3 mt-2 border-t flex justify-between items-center text-slate-600 bg-slate-50 p-2 rounded">
+                          <span className="text-sm font-bold">إجمالي درجات السؤال:</span>
+                          <span className="font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
                             {question.parts.reduce((sum, p) => sum + p.maxScore, 0)} درجة
-                          </p>
+                          </span>
                         </div>
                       </CardContent>
                     </Card>
@@ -224,22 +256,18 @@ export function MarkDistributionManager() {
                 </div>
               )}
 
+              {/* شريط الإجمالي والحفظ */}
               {questions.length > 0 && (
-                <div className="pt-4 border-t">
-                  <div className="flex justify-between items-center mb-4">
-                    <p className="font-bold text-lg">
-                      إجمالي درجات الاختبار:
-                    </p>
-                    <p className="font-bold text-lg text-blue-600">
-                      {questions.reduce(
-                        (sum, q) => sum + q.parts.reduce((pSum, p) => pSum + p.maxScore, 0),
-                        0
-                      )} درجة
+                <div className="pt-6 border-t mt-4">
+                  <div className="flex justify-between items-center mb-4 bg-green-50 p-4 rounded-lg border border-green-200">
+                    <p className="font-bold text-lg text-green-800">الإجمالي الكلي للاختبار:</p>
+                    <p className="font-bold text-2xl text-green-700">
+                      {getTotalMarks({ questions })} <span className="text-sm font-normal">درجة</span>
                     </p>
                   </div>
-                  <Button onClick={handleSave} className="w-full" size="lg">
-                    <Save className="w-4 h-4 ml-2" />
-                    حفظ التوزيع
+                  <Button onClick={handleSave} className="w-full h-14 text-lg bg-slate-900 hover:bg-slate-800">
+                    <Save className="w-5 h-5 ml-2" />
+                    حفظ واعتماد قالب توزيع الدرجات
                   </Button>
                 </div>
               )}
@@ -247,71 +275,66 @@ export function MarkDistributionManager() {
           </Card>
         </div>
 
-        {/* التوزيعات المحفوظة */}
-        <div>
-          <Card>
-            <CardHeader>
-              <CardTitle>التوزيعات المحفوظة</CardTitle>
-              <CardDescription>نماذج توزيع الدرجات التي تم إعدادها مسبقاً</CardDescription>
+        {/* --- العمود الأيسر: التوزيعات المحفوظة --- */}
+        <div className="lg:col-span-5">
+          <Card className="shadow-sm sticky top-6">
+            <CardHeader className="bg-slate-50 border-b">
+              <CardTitle className="text-lg">القوالب المحفوظة مسبقاً</CardTitle>
+              <CardDescription>النماذج الجاهزة للاستخدام</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               {distributions.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">
-                  لا توجد توزيعات محفوظة حالياً
+                <div className="text-center py-10 text-slate-400">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                  <p>لا توجد قوالب محفوظة</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="divide-y max-h-[70vh] overflow-y-auto custom-scrollbar">
                   {distributions.map((dist, index) => (
-                    <Card key={index} className="border hover:border-blue-300 transition-colors">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                          <CardTitle className="text-base">{dist.examName}</CardTitle>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => loadTemplate(dist)}
-                          >
-                            تحميل
-                          </Button>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="text-right">السؤال</TableHead>
-                              <TableHead className="text-right">الأجزاء</TableHead>
-                              <TableHead className="text-left">الدرجات</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {dist.questions.map((q) => (
-                              <TableRow key={q.questionNumber}>
-                                <TableCell>س {q.questionNumber}</TableCell>
-                                <TableCell>{q.parts.length}</TableCell>
-                                <TableCell className="text-left">
-                                  {q.parts.reduce((sum, p) => sum + p.maxScore, 0)}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow className="bg-gray-50/50 font-bold">
-                              <TableCell colSpan={2} className="text-right">
-                                الإجمالي
-                              </TableCell>
-                              <TableCell className="text-left">
-                                {getTotalMarks(dist)}
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </CardContent>
-                    </Card>
+                    <div key={index} className="p-4 hover:bg-slate-50 transition-colors group">
+                      <div className="flex items-start justify-between mb-3">
+                        <h3 className="font-bold text-slate-800 text-lg leading-tight">
+                          {dist.examName}
+                        </h3>
+                        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200 shrink-0">
+                          {getTotalMarks(dist)} درجة
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex gap-2 text-sm text-slate-500 mb-4">
+                        <span>{dist.questions.length} أسئلة</span>
+                        <span>•</span>
+                        <span>{dist.questions.reduce((sum, q) => sum + q.parts.length, 0)} أجزاء (فروع)</span>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 bg-white border-slate-300 hover:bg-blue-50 hover:text-blue-700"
+                          onClick={() => loadTemplate(dist)}
+                        >
+                          <FileEdit className="w-4 h-4 ml-2" />
+                          تحميل وتعديل
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="px-3 text-slate-400 hover:bg-red-50 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => deleteTemplate(dist.examName)}
+                          title="حذف القالب"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
+        
       </div>
     </div>
   );
