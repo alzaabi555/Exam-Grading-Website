@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { Save, CheckCircle, AlertCircle, Check, X, Type, Trash2, Target } from 'lucide-react';
+import { Save, CheckCircle, AlertCircle, Check, X, Type, Trash2, Target, Printer } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -9,7 +9,9 @@ import { getPapers } from '../utils/storage';
 import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
 
+// مكتبات الـ PDF
 import { Document, Page, pdfjs } from 'react-pdf';
+import { PDFDocument, rgb } from 'pdf-lib'; // <-- المكتبة السحرية الجديدة
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
@@ -24,7 +26,7 @@ interface Annotation {
   y: number;
   type: 'check' | 'cross' | 'score';
   value?: string;
-  partId?: string; // لربط العلامة بالسؤال المحدد
+  partId?: string;
 }
 
 export function GradingInterface() {
@@ -34,12 +36,13 @@ export function GradingInterface() {
   
   const [numPages, setNumPages] = useState<number>(1);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [activeTool, setActiveTool] = useState<'check' | 'cross' | 'score'>('check'); // الافتراضي 'صح'
+  const [activeTool, setActiveTool] = useState<'check' | 'cross' | 'score'>('check');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
-
-  // --- السحر الجديد: تتبع الجزء النشط حالياً ---
   const [activePartId, setActivePartId] = useState<string | null>(null);
+  
+  // حالة تحميل لزر الطباعة
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     loadNextPaper();
@@ -53,7 +56,6 @@ export function GradingInterface() {
       setScores({});
       setAnnotations([]);
       setCurrentPage(1);
-      // تنشيط أول جزء في أول سؤال تلقائياً
       if (pendingPaper.questions.length > 0 && pendingPaper.questions[0].parts.length > 0) {
         setActivePartId(pendingPaper.questions[0].parts[0].id);
       }
@@ -62,7 +64,6 @@ export function GradingInterface() {
     }
   };
 
-  // دالة القفز التلقائي للسؤال التالي
   const advanceToNextPart = (currentPartId: string) => {
     if (!currentPaper) return;
     const allParts = currentPaper.questions.flatMap(q => q.parts);
@@ -72,7 +73,7 @@ export function GradingInterface() {
       setActivePartId(allParts[currentIndex + 1].id);
     } else {
       setActivePartId(null);
-      toast.success('تم الانتهاء من جميع الأسئلة! يرجى إنهاء الورقة.');
+      toast.success('تم الانتهاء من جميع الأسئلة!');
     }
   };
 
@@ -87,7 +88,7 @@ export function GradingInterface() {
     if (numValue > maxScore) numValue = maxScore;
     if (numValue < 0) numValue = 0;
     setScores(prev => ({ ...prev, [partId]: numValue }));
-    setActivePartId(partId); // عند التعديل اليدوي، نجعله هو النشط
+    setActivePartId(partId);
   };
 
   const calculateTotal = () => {
@@ -117,12 +118,10 @@ export function GradingInterface() {
     }
   };
 
-  // --- دالة التصحيح الذكية المدمجة ---
   const handlePdfClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!activeTool || !pdfWrapperRef.current || !currentPaper) return;
-
     if (!activePartId) {
-      toast.error('يرجى تحديد السؤال المراد تصحيحه من القائمة الجانبية');
+      toast.error('يرجى تحديد السؤال المراد تصحيحه أولاً');
       return;
     }
 
@@ -138,9 +137,9 @@ export function GradingInterface() {
     let displayValue = '';
 
     if (activeTool === 'check') {
-      newScore = currentPart.maxScore; // الدرجة الكاملة
+      newScore = currentPart.maxScore;
     } else if (activeTool === 'cross') {
-      newScore = 0; // صفر
+      newScore = 0;
     } else if (activeTool === 'score') {
       const val = prompt(`أدخل الدرجة (الحد الأقصى ${currentPart.maxScore}):`);
       if (val === null || val.trim() === '') return;
@@ -152,21 +151,15 @@ export function GradingInterface() {
       displayValue = newScore.toString();
     }
 
-    // 1. تسجيل الدرجة آلياً
     setScores(prev => ({ ...prev, [activePartId]: newScore }));
-
-    // 2. رسم الختم
     const newAnnotation: Annotation = {
       id: Date.now().toString(),
       x, y, type: activeTool, value: displayValue, partId: activePartId
     };
     setAnnotations([...annotations, newAnnotation]);
-
-    // 3. القفز للسؤال التالي تلقائياً
     advanceToNextPart(activePartId);
   };
 
-  // حذف العلامة يمسح الدرجة آلياً أيضاً
   const removeAnnotation = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const annToRemove = annotations.find(a => a.id === id);
@@ -174,9 +167,93 @@ export function GradingInterface() {
       const newScores = { ...scores };
       delete newScores[annToRemove.partId];
       setScores(newScores);
-      setActivePartId(annToRemove.partId); // إعادة التنشيط للسؤال المحذوف لتصحيحه مجدداً
+      setActivePartId(annToRemove.partId);
     }
     setAnnotations(annotations.filter(a => a.id !== id));
+  };
+
+  // --- السحر الجديد: طباعة وحفظ الـ PDF ---
+  const exportGradedPdf = async () => {
+    if (!currentPaper || !currentPaper.pdfUrl) {
+      toast.error('ملف الاختبار غير موجود!');
+      return;
+    }
+
+    setIsExporting(true);
+    toast.info('جاري دمج العلامات وتجهيز الملف للطباعة...');
+
+    try {
+      // 1. جلب ملف الـ PDF الأصلي
+      const existingPdfBytes = await fetch(currentPaper.pdfUrl).then(res => res.arrayBuffer());
+      const pdfDoc = await PDFDocument.load(existingPdfBytes);
+      
+      // نفترض أن المعلم يصحح الصفحة الأولى حالياً (يمكن تطويرها لدعم صفحات متعددة لاحقاً)
+      const pages = pdfDoc.getPages();
+      const page = pages[currentPage - 1]; 
+      const { width, height } = page.getSize();
+
+      // 2. رسم كل علامة في مكانها الصحيح هندسياً
+      for (const ann of annotations) {
+        // تحويل النسبة المئوية إلى نقاط PDF حقيقية
+        const xPos = (ann.x / 100) * width;
+        // الـ PDF يبدأ الإحداثيات من الأسفل للأعلى، لذلك نعكس قيمة الـ Y
+        const yPos = height - ((ann.y / 100) * height);
+
+        if (ann.type === 'check') {
+          // رسم علامة الصح الخضراء بمسار SVG
+          page.drawSvgPath('M -5,5 L 5,15 L 20,-5', {
+            x: xPos,
+            y: yPos,
+            borderColor: rgb(0.1, 0.6, 0.1), // لون أخضر
+            borderWidth: 4,
+          });
+        } else if (ann.type === 'cross') {
+          // رسم علامة الخطأ الحمراء
+          page.drawSvgPath('M -10,-10 L 10,10 M 10,-10 L -10,10', {
+            x: xPos,
+            y: yPos,
+            borderColor: rgb(0.8, 0.1, 0.1), // لون أحمر
+            borderWidth: 4,
+          });
+        } else if (ann.type === 'score' && ann.value) {
+          // طباعة الدرجة كنص أحمر
+          page.drawText(ann.value, {
+            x: xPos - 10,
+            y: yPos - 10,
+            size: 24,
+            color: rgb(0.8, 0.1, 0.1),
+          });
+        }
+      }
+
+      // رسم الختم النهائي للمجموع في أعلى يسار الصفحة
+      const totalScore = calculateTotal();
+      page.drawText(`${totalScore} / ${currentPaper.totalMaxScore}`, {
+        x: 40,
+        y: height - 50,
+        size: 28,
+        color: rgb(0.8, 0.1, 0.1),
+      });
+
+      // 3. حفظ وتحميل الملف الجديد
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ورقة_مصححة_${currentPaper.studentName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast.success('تم تصدير الورقة بنجاح! راجع مجلد التنزيلات.');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء تصدير ملف الـ PDF.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (!currentPaper) return (
@@ -190,7 +267,7 @@ export function GradingInterface() {
   return (
     <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-slate-100" dir="rtl">
       
-      {/* العمود الأيمن */}
+      {/* العمود الأيمن (كما هو) */}
       <div className="w-[380px] min-w-[350px] bg-white border-l shadow-2xl flex flex-col z-10">
         <div className="p-4 border-b bg-blue-50/50">
           <div className="flex justify-between items-center mb-3">
@@ -245,19 +322,34 @@ export function GradingInterface() {
           ))}
         </div>
 
-        <div className="p-4 border-t bg-slate-50 space-y-4">
+        {/* أزرار الحفظ والطباعة الجديدة */}
+        <div className="p-4 border-t bg-slate-50 space-y-3">
           <div className="flex justify-between p-3 bg-white rounded-lg border font-bold text-lg">
             <span>المجموع:</span>
             <span className="text-blue-700">{calculateTotal()} / {currentPaper.totalMaxScore}</span>
           </div>
+          
+          <Button 
+            onClick={exportGradedPdf} 
+            disabled={isExporting}
+            className="w-full bg-slate-800 hover:bg-slate-900 h-10"
+          >
+            <Printer className="w-4 h-4 ml-2" />
+            {isExporting ? 'جاري الدمج...' : 'استخراج الورقة وطباعتها'}
+          </Button>
+
           <div className="flex gap-2">
-            <Button onClick={() => saveProgress(false)} variant="outline" className="flex-1">حفظ</Button>
-            <Button onClick={() => saveProgress(true)} className="flex-1 bg-green-600 hover:bg-green-700">إنهاء وتالي</Button>
+            <Button onClick={() => saveProgress(false)} variant="outline" className="flex-1 bg-white h-12 text-slate-600">
+              <Save className="w-5 h-5 ml-2" /> حفظ مؤقت
+            </Button>
+            <Button onClick={() => saveProgress(true)} className="flex-1 bg-green-600 hover:bg-green-700 h-12">
+              <CheckCircle className="w-5 h-5 ml-2" /> إنهاء وتالي
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* العمود الأيسر (اللوحة التفاعلية) */}
+      {/* العمود الأيسر (كما هو) */}
       <div className="flex-1 p-4 h-full bg-slate-200 flex flex-col overflow-hidden">
         <div className="bg-white p-2 mb-2 rounded-lg shadow-sm border border-slate-300 flex items-center justify-center gap-4">
           <span className="text-sm font-bold text-slate-500">القلم الحالي:</span>
