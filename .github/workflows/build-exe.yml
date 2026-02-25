@@ -4,12 +4,11 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: # هذه هي الكلمة السحرية التي ستسمح لك بتشغيله بضغطة زر
+  workflow_dispatch: 
 
-# --- الإضافة السحرية التي ستسمح برفع الملف ---
+# السماح برفع الملف النهائي
 permissions:
   contents: write
-# ---------------------------------------------
 
 jobs:
   release:
@@ -19,20 +18,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # تنظيف بيئة جيت هوب من أي إعدادات تسبب خطأ 403
-      - name: Remove local .npmrc (If exists)
-        run: Remove-Item -Path .npmrc -ErrorAction SilentlyContinue
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: 'https://registry.npmjs.org'
+          # حذفنا كل تعقيدات السيرفرات وكلمات المرور من هنا
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-        env:
-          NODE_AUTH_TOKEN: ""
+        # تثبيت طبيعي ونظيف
+        run: npm install --legacy-peer-deps
 
       - name: Build React App
         run: npm run build
