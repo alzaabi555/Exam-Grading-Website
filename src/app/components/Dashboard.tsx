@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { FileText, Trash2, Eye, BarChart3, Upload, Settings } from 'lucide-react';
+import { FileText, Trash2, Eye, BarChart3, Upload, Settings, Users } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
@@ -9,11 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { getPapers, deletePaper, getMarkDistributions } from '../utils/storage';
 import { ExamPaper, MarkDistribution } from '../types/exam';
 import { toast } from 'sonner';
+import { StudentImporter, Student } from './StudentImporter'; // إضافة مكون الاستيراد
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [papers, setPapers] = useState<ExamPaper[]>([]);
   const [distributions, setDistributions] = useState<MarkDistribution[]>([]);
+  const [students, setStudents] = useState<Student[]>([]); // حالة حفظ الطلاب
 
   useEffect(() => {
     loadData();
@@ -22,6 +24,9 @@ export function Dashboard() {
   const loadData = () => {
     setPapers(getPapers());
     setDistributions(getMarkDistributions());
+    // جلب الطلاب المحفوظين مسبقاً
+    const storedStudents = JSON.parse(localStorage.getItem('fastGrader_students') || '[]');
+    setStudents(storedStudents);
   };
 
   const handleDelete = (paperId: string) => {
@@ -30,6 +35,12 @@ export function Dashboard() {
       loadData();
       toast.success('تم حذف الورقة بنجاح');
     }
+  };
+
+  // دالة استلام الطلاب من ملف الإكسل وحفظهم
+  const handleStudentsImported = (importedStudents: Student[]) => {
+    setStudents(importedStudents);
+    localStorage.setItem('fastGrader_students', JSON.stringify(importedStudents));
   };
 
   const getStatusBadge = (status: ExamPaper['status']) => {
@@ -138,9 +149,15 @@ export function Dashboard() {
         <TabsList className="flex justify-start">
           <TabsTrigger value="papers">أوراق الاختبارات</TabsTrigger>
           <TabsTrigger value="results">نتائج الطلاب</TabsTrigger>
+          {/* التبويب الجديد للطلاب */}
+          <TabsTrigger value="students" className="gap-2">
+            <Users className="w-4 h-4" />
+            إدارة الطلاب
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="papers">
+          {/* ... الكود الخاص بأوراق الاختبار كما هو بدون أي تغيير ... */}
           <Card>
             <CardHeader>
               <CardTitle>جميع أوراق الاختبار</CardTitle>
@@ -227,6 +244,7 @@ export function Dashboard() {
         </TabsContent>
 
         <TabsContent value="results">
+          {/* ... الكود الخاص بالنتائج كما هو بدون تغيير ... */}
           <Card>
             <CardHeader>
               <CardTitle>نتائج الطلاب</CardTitle>
@@ -303,6 +321,53 @@ export function Dashboard() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* --- محتوى التبويب الجديد: إدارة الطلاب --- */}
+        <TabsContent value="students">
+          <Card>
+            <CardHeader>
+              <CardTitle>قائمة الطلاب</CardTitle>
+              <CardDescription>قم برفع كشف إكسل لإضافة الطلاب بسرعة لتسهيل عملية ربط أوراق الاختبار</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* مكون زر رفع ملف الإكسل */}
+              <div className="mb-6">
+                <StudentImporter onImportSuccess={handleStudentsImported} />
+              </div>
+
+              {students.length === 0 ? (
+                <div className="text-center py-8 bg-slate-50 rounded-lg border border-dashed border-slate-300">
+                  <Users className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                  <p className="text-slate-500">لم يتم استيراد أي طلاب بعد. قم برفع ملف إكسل لتبدأ.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border rounded-md">
+                  <Table>
+                    <TableHeader className="bg-slate-50">
+                      <TableRow>
+                        <TableHead className="text-right">الرقم التعريفي</TableHead>
+                        <TableHead className="text-right">اسم الطالب</TableHead>
+                        <TableHead className="text-right">الصف / الشعبة</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {students.map((student) => (
+                        <TableRow key={student.id}>
+                          <TableCell className="font-medium text-blue-600">{student.id}</TableCell>
+                          <TableCell>{student.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{student.className || 'غير محدد'}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
       </Tabs>
     </div>
   );
