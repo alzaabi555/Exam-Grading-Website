@@ -1,0 +1,27 @@
+/* استيراد الملفات الأساسية أولاً */
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+:root {
+  direction: rtl;
+}
+
+body {
+  text-align: right;
+  /* اختيار خط عربي أنيق يتناسب مع تصاميم فيجما الحديثة */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* حل مشكلة العناصر التي لا تنقلب تلقائياً في Tailwind */
+.rtl-flip {
+  transform: scaleX(-1);
+}
+
+/* لضمان محاذاة النصوص في حقول الإدخال (Inputs) */
+input, textarea, select {
+  text-align: right;
+  direction: rtl;
+}
