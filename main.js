@@ -1,5 +1,10 @@
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
+import { app, BrowserWindow } from 'electron';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// هذه الأسطر لتعريف المسارات في بيئة ES Modules الحديثة
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -7,13 +12,14 @@ function createWindow() {
     height: 800,
     webPreferences: {
       nodeIntegration: true,
+      contextIsolation: false
     },
     // إخفاء القوائم العلوية لجعل التطبيق يبدو احترافياً
     autoHideMenuBar: true, 
   });
 
-  // في وضع التطوير نفتح رابط Vite، وفي الإنتاج نفتح ملف الـ html
-  const startUrl = process.env.NODE_ENV === 'development' 
+  // إذا كان التطبيق مجمعاً (EXE) يفتح ملف HTML، وإلا يفتح رابط التطوير
+  const startUrl = !app.isPackaged 
     ? 'http://localhost:5173' 
     : `file://${path.join(__dirname, 'dist/index.html')}`;
 
