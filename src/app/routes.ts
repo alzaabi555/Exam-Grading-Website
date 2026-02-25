@@ -1,4 +1,5 @@
-import { createBrowserRouter } from 'react-router';
+// 1. التعديل الأول هنا: استدعاء createHashRouter
+import { createHashRouter } from 'react-router';
 import { Layout } from './components/Layout';
 import { UploadPaper } from './components/UploadPaper';
 import { GradingInterface } from './components/GradingInterface';
@@ -6,7 +7,8 @@ import { Dashboard } from './components/Dashboard';
 import { StudentResults } from './components/StudentResults';
 import { MarkDistributionManager } from './components/MarkDistribution';
 
-export const router = createBrowserRouter([
+// 2. التعديل الثاني هنا: استخدام createHashRouter
+export const router = createHashRouter([
   {
     path: '/',
     Component: Layout,
