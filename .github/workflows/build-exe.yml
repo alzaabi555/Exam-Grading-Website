@@ -1,0 +1,38 @@
+name: Build and Release EXE
+
+on:
+  push:
+    tags:
+      - 'v*' # سيبدأ العمل فقط عندما ترفع "Tag" يبدأ بحرف v مثل v1.0.0
+  workflow_dispatch: # يسمح لك بتشغيل البناء يدوياً من صفحة Actions
+
+jobs:
+  release:
+    runs-on: windows-latest # البناء يجب أن يتم على نظام ويندوز لإنتاج EXE
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build React App
+        run: npm run build
+
+      - name: Build Electron App (EXE)
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # مفتاح سري تلقائي من جيت هوب للرفع
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastGrader-EXE
+          path: release/*.exe
