@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { ArrowRight, FileText, CheckCircle, XCircle } from 'lucide-react'; // استبدلت ArrowLeft بـ ArrowRight
+import { ArrowRight, FileText, CheckCircle, XCircle, Printer, Download, Award } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
@@ -8,11 +8,14 @@ import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
 import { getPapers } from '../utils/storage';
 import { ExamPaper } from '../types/exam';
+import { toast } from 'sonner';
+import { PDFDocument, rgb } from 'pdf-lib';
 
 export function StudentResults() {
   const { paperId } = useParams();
   const navigate = useNavigate();
   const [paper, setPaper] = useState<ExamPaper | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const papers = getPapers();
@@ -49,192 +52,262 @@ export function StudentResults() {
 
   const gradeInfo = getGrade(percentage);
 
+  // دالة طباعة التقرير (الشهادة)
+  const handlePrintReport = () => {
+    window.print();
+  };
+
+  // دالة تحميل ورقة الاختبار الأصلية مع الأختام
+  const handleDownloadPaper = async () => {
+    if (!paper.pdfUrl) {
+      toast.error('ملف الاختبار غير موجود!');
+      return;
+    }
+
+    setIsExporting(true);
+    toast.info('جاري تجهيز الورقة المصححة...');
+
+    try {
+      const fileBytes = await fetch(paper.pdfUrl).then(res => res.arrayBuffer());
+      let pdfDoc;
+      let page;
+      let width, height;
+
+      if (paper.fileType === 'image') {
+        pdfDoc = await PDFDocument.create();
+        let imageToEmbed;
+        try { imageToEmbed = await pdfDoc.embedJpg(fileBytes); } 
+        catch { imageToEmbed = await pdfDoc.embedPng(fileBytes); }
+        
+        const dims = imageToEmbed.scale(1);
+        width = dims.width; height = dims.height;
+        page = pdfDoc.addPage([width, height]);
+        page.drawImage(imageToEmbed, { x: 0, y: 0, width, height });
+      } else {
+        pdfDoc = await PDFDocument.load(fileBytes);
+        page = pdfDoc.getPages()[0]; 
+        const size = page.getSize();
+        width = size.width; height = size.height;
+      }
+
+      // رسم العلامات إذا كانت محفوظة
+      if (paper.annotations && paper.annotations.length > 0) {
+        for (const ann of paper.annotations) {
+          const xPos = (ann.x / 100) * width;
+          const yPos = height - ((ann.y / 100) * height);
+
+          if (ann.type === 'check') {
+            page.drawSvgPath('M -5,5 L 5,15 L 20,-5', { x: xPos, y: yPos, borderColor: rgb(0.1, 0.6, 0.1), borderWidth: 4 });
+          } else if (ann.type === 'cross') {
+            page.drawSvgPath('M -10,-10 L 10,10 M 10,-10 L -10,10', { x: xPos, y: yPos, borderColor: rgb(0.8, 0.1, 0.1), borderWidth: 4 });
+          } else if (ann.type === 'score' && ann.value) {
+            page.drawText(ann.value, { x: xPos - 10, y: yPos - 10, size: 24, color: rgb(0.8, 0.1, 0.1) });
+          }
+        }
+      }
+
+      // رسم المجموع النهائي
+      page.drawText(`المجموع: ${paper.totalScore} / ${paper.totalMaxScore}`, {
+        x: 40, y: height - 50, size: 24, color: rgb(0.8, 0.1, 0.1),
+      });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `اختبار_${paper.studentName}_${paper.examName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast.success('تم التنزيل بنجاح!');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء تصدير الورقة.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
-    <div className="container mx-auto p-6 max-w-5xl text-right" dir="rtl">
-      <div className="mb-6">
-        <Button variant="ghost" onClick={() => navigate('/dashboard')} className="mb-4">
+    <div className="container mx-auto p-4 md:p-8 max-w-5xl text-right font-sans" dir="rtl">
+      
+      {/* شريط الأزرار (يختفي عند الطباعة) */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 print:hidden bg-white p-4 rounded-lg shadow-sm border">
+        <Button variant="ghost" onClick={() => navigate('/dashboard')} className="text-slate-600">
           <ArrowRight className="w-4 h-4 ml-2" />
-          العودة للوحة التحكم
+          العودة للنتائج
         </Button>
-        <h1 className="text-3xl font-bold mb-2">نتائج الاختبار</h1>
-        <p className="text-gray-600">تفاصيل رصد الدرجات والنتيجة النهائية</p>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={handleDownloadPaper} disabled={isExporting} className="border-blue-200 text-blue-700 hover:bg-blue-50">
+            <Download className="w-4 h-4 ml-2" />
+            {isExporting ? 'جاري التجهيز...' : 'تنزيل ورقة الاختبار'}
+          </Button>
+          <Button onClick={handlePrintReport} className="bg-slate-800 hover:bg-slate-900">
+            <Printer className="w-4 h-4 ml-2" />
+            طباعة الشهادة (التقرير)
+          </Button>
+        </div>
       </div>
 
-      {/* معلومات الطالب */}
-      <Card className="mb-6 shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-xl">معلومات الطالب</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <p className="text-sm text-gray-500">اسم الطالب</p>
-              <p className="font-bold">{paper.studentName}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">رقم الطالب</p>
-              <p className="font-bold">{paper.studentId}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">اسم الاختبار</p>
-              <p className="font-bold">{paper.examName}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">تاريخ التصحيح</p>
-              <p className="font-bold">
-                {paper.gradedDate
-                  ? new Date(paper.gradedDate).toLocaleDateString('ar-EG')
-                  : 'جاري التصحيح...'}
+      {/* --- بداية المنطقة المخصصة للطباعة (الشهادة) --- */}
+      <div className="bg-white p-8 md:p-12 rounded-xl shadow-lg border-4 border-double border-slate-200 print:shadow-none print:border-none print:p-0">
+        
+        {/* الترويسة الرسمية */}
+        <div className="text-center mb-10 pb-6 border-b-2 border-slate-100">
+          <Award className="w-16 h-16 mx-auto text-blue-600 mb-4" />
+          <h1 className="text-3xl font-black text-slate-800 mb-2">تقرير نتيجة اختبار تفصيلي</h1>
+          <p className="text-slate-500 font-medium">مستخرج آلياً من نظام المصحح السريع</p>
+        </div>
+
+        {/* معلومات الطالب */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10 bg-slate-50 p-6 rounded-lg border border-slate-100 print:bg-transparent print:border-b">
+          <div>
+            <p className="text-sm text-slate-500 mb-1">اسم الطالب</p>
+            <p className="font-bold text-lg text-blue-900">{paper.studentName}</p>
+          </div>
+          <div>
+            <p className="text-sm text-slate-500 mb-1">الرقم التعريفي</p>
+            <p className="font-bold text-lg">{paper.studentId}</p>
+          </div>
+          <div>
+            <p className="text-sm text-slate-500 mb-1">اسم الاختبار</p>
+            <p className="font-bold text-lg">{paper.examName}</p>
+          </div>
+          <div>
+            <p className="text-sm text-slate-500 mb-1">تاريخ الاعتماد</p>
+            <p className="font-bold text-lg">
+              {paper.gradedDate ? new Date(paper.gradedDate).toLocaleDateString('ar-EG') : '—'}
+            </p>
+          </div>
+        </div>
+
+        {/* ملخص الدرجات (البطاقات) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          <Card className="border-t-4 border-t-blue-500 shadow-sm print:shadow-none">
+            <CardContent className="p-6 text-center">
+              <p className="text-sm text-slate-500 mb-2 font-bold">الدرجة المكتسبة</p>
+              <p className="text-5xl font-black text-slate-800">
+                {paper.totalScore !== undefined ? paper.totalScore : '—'} 
+                <span className="text-xl text-slate-400 font-medium ml-1">/ {paper.totalMaxScore}</span>
               </p>
-            </div>
+            </CardContent>
+          </Card>
+          <Card className={`border-t-4 shadow-sm print:shadow-none ${percentage >= 50 ? 'border-t-green-500' : 'border-t-red-500'}`}>
+            <CardContent className="p-6 text-center">
+              <p className="text-sm text-slate-500 mb-2 font-bold">النسبة المئوية</p>
+              <p className={`text-5xl font-black ${gradeInfo.color}`}>
+                {percentage.toFixed(1)}%
+              </p>
+            </CardContent>
+          </Card>
+          <Card className={`border-t-4 shadow-sm print:shadow-none ${percentage >= 50 ? 'border-t-green-500' : 'border-t-red-500'}`}>
+            <CardContent className="p-6 text-center">
+              <p className="text-sm text-slate-500 mb-2 font-bold">التقدير العام</p>
+              <p className={`text-3xl font-black mt-3 ${gradeInfo.color}`}>
+                {gradeInfo.grade}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* شريط التقدم */}
+        <div className="mb-10 bg-slate-50 p-6 rounded-lg border border-slate-100 print:hidden">
+          <div className="flex justify-between text-sm font-bold text-slate-700 mb-3">
+            <span>مؤشر الأداء العام</span>
+            <span>{paper.totalScore !== undefined ? paper.totalScore : 0} من أصل {paper.totalMaxScore}</span>
           </div>
-        </CardContent>
-      </Card>
+          <Progress value={percentage} className="h-4 bg-slate-200" />
+        </div>
 
-      {/* ملخص الدرجات */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <Card className="border-t-4 border-t-blue-500">
-          <CardContent className="p-6 text-center">
-            <p className="text-sm text-gray-500 mb-2">إجمالي الدرجة</p>
-            <p className="text-4xl font-black">
-              {paper.totalScore !== undefined ? paper.totalScore : '—'} <span className="text-lg text-gray-400">/ {paper.totalMaxScore}</span>
-            </p>
-          </CardContent>
-        </Card>
-        <Card className={`border-t-4 ${percentage >= 50 ? 'border-t-green-500' : 'border-t-red-500'}`}>
-          <CardContent className="p-6 text-center">
-            <p className="text-sm text-gray-500 mb-2">النسبة المئوية</p>
-            <p className={`text-4xl font-black ${gradeInfo.color}`}>
-              {percentage.toFixed(1)}%
-            </p>
-          </CardContent>
-        </Card>
-        <Card className={`border-t-4 ${percentage >= 50 ? 'border-t-green-500' : 'border-t-red-500'}`}>
-          <CardContent className="p-6 text-center">
-            <p className="text-sm text-gray-500 mb-2">التقدير العام</p>
-            <p className={`text-2xl font-black ${gradeInfo.color}`}>
-              {gradeInfo.grade}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* شريط التقدم */}
-      <Card className="mb-6">
-        <CardContent className="p-6">
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm font-medium">
-              <span>مستوى الإنجاز في الدرجات</span>
-              <span>{paper.totalScore !== undefined ? paper.totalScore : 0} من أصل {paper.totalMaxScore}</span>
-            </div>
-            <Progress value={percentage} className="h-4" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* تفاصيل الأسئلة */}
-      <Card>
-        <CardHeader>
-          <CardTitle>تحليل الأسئلة التفصيلي</CardTitle>
-        </CardHeader>
-        <CardContent>
+        {/* تفاصيل الأسئلة */}
+        <div>
+          <h3 className="text-2xl font-bold text-slate-800 mb-6 border-b pb-2 inline-block">تحليل الأداء التفصيلي:</h3>
           <div className="space-y-8">
             {paper.questions.map((question, qIndex) => {
               const questionScore = question.parts.reduce((sum, p) => sum + (p.score || 0), 0);
-              const questionPercentage = question.totalMaxScore > 0
-                ? (questionScore / question.totalMaxScore) * 100
-                : 0;
+              const questionPercentage = question.totalMaxScore > 0 ? (questionScore / question.totalMaxScore) * 100 : 0;
 
               return (
-                <div key={question.id}>
-                  {qIndex > 0 && <Separator className="mb-8" />}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-bold text-blue-800">
-                        السؤال {question.questionNumber}
-                      </h3>
-                      <div className="text-left">
-                        <p className="font-bold text-lg">
-                          {questionScore} <span className="text-sm text-gray-400">/ {question.totalMaxScore}</span>
-                        </p>
-                        <p className="text-xs font-medium bg-gray-100 px-2 py-1 rounded">
-                          {questionPercentage.toFixed(1)}%
-                        </p>
-                      </div>
+                <div key={question.id} className="break-inside-avoid">
+                  <div className="flex items-center justify-between bg-blue-50/50 p-3 rounded-t-lg border border-b-0 border-blue-100">
+                    <h4 className="text-lg font-bold text-blue-900">
+                      السؤال {question.questionNumber}
+                    </h4>
+                    <div className="flex items-center gap-3">
+                      <p className="font-bold text-blue-800">
+                        {questionScore} <span className="text-sm text-blue-400">/ {question.totalMaxScore}</span>
+                      </p>
+                      <Badge className="bg-white text-blue-700 border-blue-200 shadow-sm hover:bg-white">
+                        {questionPercentage.toFixed(0)}%
+                      </Badge>
                     </div>
-
-                    <Table>
-                      <TableHeader className="bg-gray-50">
-                        <TableRow>
-                          <TableHead className="text-right">الجزء</TableHead>
-                          <TableHead className="text-right">معرف الجزء</TableHead>
-                          <TableHead className="text-center">الدرجة القصوى</TableHead>
-                          <TableHead className="text-center">الدرجة المرصودة</TableHead>
-                          <TableHead className="text-left">النتيجة</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {question.parts.map(part => {
-                          const partPercentage = part.maxScore > 0
-                            ? ((part.score || 0) / part.maxScore) * 100
-                            : 0;
-                          const isPerfect = part.score === part.maxScore;
-                          const isFailed = (part.score || 0) < part.maxScore * 0.5;
-
-                          return (
-                            <TableRow key={part.id}>
-                              <TableCell className="font-bold">
-                                جزء {part.partNumber}
-                              </TableCell>
-                              <TableCell className="text-xs text-gray-400 font-mono">
-                                {part.id}
-                              </TableCell>
-                              <TableCell className="text-center">{part.maxScore}</TableCell>
-                              <TableCell className="text-center">
-                                <span className={`font-bold ${
-                                  isPerfect ? 'text-green-600' :
-                                  isFailed ? 'text-red-600' :
-                                  'text-blue-600'
-                                }`}>
-                                  {part.score !== undefined ? part.score : '—'}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-left">
-                                {part.score !== undefined && (
-                                  <div className="flex items-center justify-start gap-2">
-                                    <span className="text-xs font-medium">
-                                      {partPercentage.toFixed(0)}%
-                                    </span>
-                                    {isPerfect ? (
-                                      <CheckCircle className="w-5 h-5 text-green-600" />
-                                    ) : isFailed ? (
-                                      <XCircle className="w-5 h-5 text-red-500" />
-                                    ) : null}
-                                  </div>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
                   </div>
+
+                  <Table className="border border-slate-200">
+                    <TableHeader className="bg-slate-50">
+                      <TableRow>
+                        <TableHead className="text-right w-32">الجزء</TableHead>
+                        <TableHead className="text-center">الدرجة القصوى</TableHead>
+                        <TableHead className="text-center">الدرجة المرصودة</TableHead>
+                        <TableHead className="text-left w-32">الحالة</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {question.parts.map(part => {
+                        const isPerfect = part.score === part.maxScore;
+                        const isFailed = (part.score || 0) < part.maxScore * 0.5;
+
+                        return (
+                          <TableRow key={part.id}>
+                            <TableCell className="font-bold text-slate-700">
+                              الفرع {part.partNumber}
+                            </TableCell>
+                            <TableCell className="text-center font-medium">{part.maxScore}</TableCell>
+                            <TableCell className="text-center">
+                              <span className={`font-bold text-lg ${
+                                isPerfect ? 'text-green-600' : isFailed ? 'text-red-600' : 'text-blue-600'
+                              }`}>
+                                {part.score !== undefined ? part.score : '—'}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-left">
+                              {part.score !== undefined && (
+                                <div className="flex items-center justify-start gap-2">
+                                  {isPerfect ? (
+                                    <Badge className="bg-green-100 text-green-700 border-none hover:bg-green-100"><CheckCircle className="w-3 h-3 mr-1" /> كاملة</Badge>
+                                  ) : isFailed ? (
+                                    <Badge className="bg-red-100 text-red-700 border-none hover:bg-red-100"><XCircle className="w-3 h-3 mr-1" /> إخفاق</Badge>
+                                  ) : (
+                                    <Badge className="bg-blue-100 text-blue-700 border-none hover:bg-blue-100">جزئية</Badge>
+                                  )}
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
               );
             })}
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* المرجع الفريد */}
-      <Card className="mt-6 bg-gray-50 border-none">
-        <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-xs text-gray-400">
+        {/* تذييل الشهادة */}
+        <div className="mt-16 pt-6 border-t border-slate-200 flex justify-between items-center text-sm text-slate-500 print:mt-10">
+          <div className="flex items-center gap-2">
             <FileText className="w-4 h-4" />
-            <span>المعرف الرقمي للورقة: {paper.id}</span>
+            <span className="font-mono">ID: {paper.id.split('-').pop()}</span>
           </div>
-        </CardContent>
-      </Card>
+          <div>
+            <p>توقيع المعلم المعتمد: ..........................</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
