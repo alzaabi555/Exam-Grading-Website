@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, Plus, AlertCircle, CheckCircle, Image as ImageIcon, FileText, Link as LinkIcon } from 'lucide-react';
+import { Upload, Plus, AlertCircle, CheckCircle, Image as ImageIcon, FileText, Link as LinkIcon, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -19,7 +19,7 @@ interface UploadedFile {
   file: File;
   previewUrl: string;
   fileType: 'pdf' | 'image';
-  selectedStudentId: string; // ID الطالب المربوط (إن وجد)
+  selectedStudentId: string;
 }
 
 export function UploadPaper() {
@@ -28,14 +28,13 @@ export function UploadPaper() {
   const [classes, setClasses] = useState<string[]>([]);
   const [distributions, setDistributions] = useState<MarkDistribution[]>([]);
   
-  // حالات الإعدادات
   const [selectedClass, setSelectedClass] = useState<string>('');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
-  
-  // حالات الملفات
   const [filesToMap, setFilesToMap] = useState<UploadedFile[]>([]);
+  
+  // حالة جديدة لمنع الضغط المتكرر أثناء الحفظ
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // تحميل البيانات الأساسية
   useEffect(() => {
     const storedStudents = JSON.parse(localStorage.getItem('fastGrader_students') || '[]');
     setStudents(storedStudents);
@@ -44,12 +43,15 @@ export function UploadPaper() {
     setClasses(uniqueClasses.sort());
     if (uniqueClasses.length > 0) setSelectedClass(uniqueClasses[0]);
 
-    const dists = getMarkDistributions();
-    setDistributions(dists);
-    if (dists.length > 0) setSelectedTemplate(dists[0].examName);
+    // بما أن دوال التخزين أصبحت Async، يجب جلب القوالب هكذا:
+    const fetchDistributions = async () => {
+      const dists = await getMarkDistributions();
+      setDistributions(dists);
+      if (dists.length > 0) setSelectedTemplate(dists[0].examName);
+    };
+    fetchDistributions();
   }, []);
 
-  // دالة استقبال الملفات ومحاولة المطابقة الآلية
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
 
@@ -58,16 +60,15 @@ export function UploadPaper() {
       const isPdf = file.type === 'application/pdf';
       const fileType = isPdf ? 'pdf' : 'image';
       
-      // محاولة التخمين الآلي: هل اسم الملف يحتوي على رقم تعريفي لأحد طلاب هذا الصف؟
       const match = file.name.match(/\d+/);
       const extractedId = match ? match[0] : '';
       const matchedStudent = classStudents.find(s => s.id === extractedId);
 
       return {
         file,
-        previewUrl: URL.createObjectURL(file),
+        previewUrl: URL.createObjectURL(file), // للرؤية المؤقتة فقط
         fileType,
-        selectedStudentId: matchedStudent ? matchedStudent.id : '' // ربط آلي إذا وجده، أو يتركه فارغاً
+        selectedStudentId: matchedStudent ? matchedStudent.id : ''
       };
     });
 
@@ -75,20 +76,28 @@ export function UploadPaper() {
     toast.success(`تم إدراج ${newFiles.length} ملف لجدول المطابقة.`);
   };
 
-  // تغيير ربط الطالب يدوياً من القائمة المنسدلة
   const handleStudentSelect = (index: number, studentId: string) => {
     const updated = [...filesToMap];
     updated[index].selectedStudentId = studentId;
     setFilesToMap(updated);
   };
 
-  // مسح ملف من القائمة
   const removeFile = (index: number) => {
     setFilesToMap(filesToMap.filter((_, i) => i !== index));
   };
 
-  // الاعتماد النهائي ورفع الأوراق المرتبطة فقط
-  const handleSubmitMappedFiles = () => {
+  // دالة مساعدة لتحويل الملف إلى نص مشفر (Base64) لحفظه للأبد
+  const convertFileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // دالة الاعتماد النهائي (تم تحويلها إلى Async)
+  const handleSubmitMappedFiles = async () => {
     if (!selectedTemplate) {
       toast.error('يرجى تحديد قالب توزيع الدرجات');
       return;
@@ -97,7 +106,6 @@ export function UploadPaper() {
     const template = distributions.find(d => d.examName === selectedTemplate);
     if (!template) return;
 
-    // تصفية الملفات التي تم ربطها بطالب فقط
     const readyFiles = filesToMap.filter(f => f.selectedStudentId !== '');
     
     if (readyFiles.length === 0) {
@@ -105,56 +113,66 @@ export function UploadPaper() {
       return;
     }
 
+    setIsSubmitting(true);
+    toast.info('جاري تشفير الملفات وحفظها في قاعدة البيانات...');
     let successCount = 0;
 
-    readyFiles.forEach(mappedFile => {
-      const student = students.find(s => s.id === mappedFile.selectedStudentId);
-      if (!student) return;
+    try {
+      for (const mappedFile of readyFiles) {
+        const student = students.find(s => s.id === mappedFile.selectedStudentId);
+        if (!student) continue;
 
-      const paperId = `paper-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        // السحر هنا: تحويل الملف إلى Base64
+        const base64Data = await convertFileToBase64(mappedFile.file);
+        const paperId = `paper-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-      // توليد الأسئلة من القالب
-      const questions: Question[] = template.questions.map(q => {
-        const questionId = `q${q.questionNumber}-${paperId}`;
-        const parts: AnswerPart[] = q.parts.map(p => ({
-          id: `p${p.partNumber}-${questionId}`,
-          questionId,
-          paperId,
-          partNumber: p.partNumber,
-          imageUrl: '', 
-          maxScore: p.maxScore,
-        }));
-        return {
-          id: questionId,
-          paperId,
-          questionNumber: q.questionNumber,
-          parts,
-          totalMaxScore: parts.reduce((sum, p) => sum + p.maxScore, 0),
+        const questions: Question[] = template.questions.map(q => {
+          const questionId = `q${q.questionNumber}-${paperId}`;
+          const parts: AnswerPart[] = q.parts.map(p => ({
+            id: `p${p.partNumber}-${questionId}`,
+            questionId,
+            paperId,
+            partNumber: p.partNumber,
+            imageUrl: '', 
+            maxScore: p.maxScore,
+          }));
+          return {
+            id: questionId,
+            paperId,
+            questionNumber: q.questionNumber,
+            parts,
+            totalMaxScore: parts.reduce((sum, p) => sum + p.maxScore, 0),
+          };
+        });
+
+        const totalMaxScore = questions.reduce((sum, q) => sum + q.totalMaxScore, 0);
+
+        const paper: ExamPaper = {
+          id: paperId,
+          studentName: student.name,
+          studentId: student.id,
+          examName: selectedTemplate,
+          pdfUrl: base64Data, // حفظ البيانات المشفرة بشكل دائم!
+          fileType: mappedFile.fileType,
+          uploadDate: new Date().toISOString(),
+          questions,
+          totalMaxScore,
+          status: 'pending',
         };
-      });
 
-      const totalMaxScore = questions.reduce((sum, q) => sum + q.totalMaxScore, 0);
+        await addPaper(paper); // نستخدم await لأن الحفظ أصبح يعتمد على المستودع العملاق
+        successCount++;
+      }
 
-      const paper: ExamPaper = {
-        id: paperId,
-        studentName: student.name,
-        studentId: student.id,
-        examName: selectedTemplate,
-        pdfUrl: mappedFile.previewUrl,
-        fileType: mappedFile.fileType, // تخزين نوع الملف ليفهمه المصحح لاحقاً
-        uploadDate: new Date().toISOString(),
-        questions,
-        totalMaxScore,
-        status: 'pending',
-      };
-
-      addPaper(paper);
-      successCount++;
-    });
-
-    toast.success(`تم ربط ورفع ${successCount} ورقة اختبار بنجاح واحترافية!`);
-    setFilesToMap([]); // تفريغ الجدول بعد النجاح
-    navigate('/grade'); // الانتقال مباشرة لغرفة التصحيح
+      toast.success(`تم تشفير ورفع ${successCount} ورقة بنجاح!`);
+      setFilesToMap([]);
+      navigate('/grade');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء حفظ الملفات. يرجى المحاولة مرة أخرى.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const classStudentsList = students.filter(s => (s.className || 'غير مصنف') === selectedClass);
@@ -167,7 +185,6 @@ export function UploadPaper() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        {/* إعدادات الإطار */}
         <Card className="border-blue-100 shadow-sm">
           <CardHeader className="bg-blue-50/50 pb-4">
             <CardTitle className="text-lg text-blue-800">1. تحديد الإطار</CardTitle>
@@ -180,7 +197,7 @@ export function UploadPaper() {
                 value={selectedClass}
                 onChange={(e) => {
                   setSelectedClass(e.target.value);
-                  setFilesToMap([]); // تصفير الملفات عند تغيير الصف لمنع اختلاط الطلاب
+                  setFilesToMap([]); 
                 }}
               >
                 {classes.length === 0 ? <option value="">لا توجد فصول (ارفع قائمة طلاب أولاً)</option> : null}
@@ -201,7 +218,6 @@ export function UploadPaper() {
           </CardContent>
         </Card>
 
-        {/* منطقة رفع الملفات */}
         <Card className="border-green-100 shadow-sm">
           <CardHeader className="bg-green-50/50 pb-4">
             <CardTitle className="text-lg text-green-800">2. إدراج الملفات</CardTitle>
@@ -214,7 +230,7 @@ export function UploadPaper() {
                 multiple
                 onChange={handleFileUpload}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={!selectedClass || !selectedTemplate}
+                disabled={!selectedClass || !selectedTemplate || isSubmitting}
               />
               <Upload className={`w-12 h-12 mb-2 ${(!selectedClass || !selectedTemplate) ? 'text-slate-300' : 'text-green-500'}`} />
               <p className="font-bold text-slate-700">اضغط أو اسحب أوراق الاختبار هنا</p>
@@ -224,7 +240,6 @@ export function UploadPaper() {
         </Card>
       </div>
 
-      {/* جدول المطابقة اليدوية / الآلية */}
       {filesToMap.length > 0 && (
         <Card className="shadow-md border-slate-200">
           <CardHeader className="bg-slate-800 text-white flex flex-row items-center justify-between py-3">
@@ -277,6 +292,7 @@ export function UploadPaper() {
                             }`}
                             value={mappedFile.selectedStudentId}
                             onChange={(e) => handleStudentSelect(idx, e.target.value)}
+                            disabled={isSubmitting}
                           >
                             <option value="" disabled>-- الرجاء تحديد صاحب هذه الورقة --</option>
                             {classStudentsList.map(s => (
@@ -286,7 +302,7 @@ export function UploadPaper() {
                         </div>
                       </td>
                       <td className="p-3 text-center">
-                        <Button variant="ghost" size="sm" onClick={() => removeFile(idx)} className="text-red-500 hover:bg-red-50">
+                        <Button variant="ghost" size="sm" onClick={() => removeFile(idx)} disabled={isSubmitting} className="text-red-500 hover:bg-red-50">
                           إزالة
                         </Button>
                       </td>
@@ -300,10 +316,10 @@ export function UploadPaper() {
               <Button 
                 onClick={handleSubmitMappedFiles} 
                 className="h-12 px-8 text-lg font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
-                disabled={filesToMap.filter(f => f.selectedStudentId !== '').length === 0}
+                disabled={filesToMap.filter(f => f.selectedStudentId !== '').length === 0 || isSubmitting}
               >
-                <Plus className="w-5 h-5 ml-2" />
-                اعتماد الأوراق المرتبطة والبدء بالتصحيح
+                {isSubmitting ? <Loader2 className="w-5 h-5 ml-2 animate-spin" /> : <Plus className="w-5 h-5 ml-2" />}
+                {isSubmitting ? 'جاري التشفير والحفظ...' : 'اعتماد الأوراق المرتبطة والبدء بالتصحيح'}
               </Button>
             </div>
           </CardContent>
