@@ -1,5 +1,15 @@
 // الأنواع الأساسية لنظام تصحيح الاختبارات
 
+// 1. تمت إضافة واجهة العلامات (الأختام الحمراء)
+export interface Annotation {
+  id: string;
+  x: number;
+  y: number;
+  type: 'check' | 'cross' | 'score';
+  value?: string;
+  partId?: string;
+}
+
 export interface AnswerPart {
   id: string;
   questionId: string;
@@ -23,17 +33,21 @@ export interface ExamPaper {
   studentName: string; // اسم الطالب
   studentId: string;   // رقم الطالب
   examName: string;    // اسم الاختبار
-  pdfUrl: string;
+  pdfUrl: string;      // سنستخدم هذا الرابط سواء كان PDF أو صورة
+  
+  // 2. التعديلات الجديدة لدعم الصور والأختام
+  fileType?: 'pdf' | 'image'; 
+  annotations?: Annotation[]; 
+
   uploadDate: string;  // تاريخ الرفع
   questions: Question[];
   totalMaxScore: number;
   totalScore?: number;
   gradedDate?: string; // تاريخ الانتهاء من التصحيح
-  // الحالات البرمجية (تبقى بالإنجليزية لسهولة التعامل معها في الكود)
   status: 'pending' | 'in-progress' | 'completed'; 
 }
 
-// كائن مساعد للترجمة (أضفه هنا لاستخدامه في كل الموقع)
+// كائن مساعد للترجمة 
 export const StatusLabels = {
   'pending': 'قيد الانتظار',
   'in-progress': 'جاري التصحيح',
