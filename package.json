@@ -86,7 +86,7 @@
     "productName": "المصحح السريع",
     "win": {
       "target": "portable",
-      "icon": "public/icon256.ico"
+      "icon": "public/icon.ico"
     },
     "files": [
       "dist/**/*",
