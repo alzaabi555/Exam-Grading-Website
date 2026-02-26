@@ -1,4 +1,3 @@
-// 1. التعديل الأول هنا: استدعاء createHashRouter
 import { createHashRouter } from 'react-router';
 import { Layout } from './components/Layout';
 import { UploadPaper } from './components/UploadPaper';
@@ -6,8 +5,8 @@ import { GradingInterface } from './components/GradingInterface';
 import { Dashboard } from './components/Dashboard';
 import { StudentResults } from './components/StudentResults';
 import { MarkDistributionManager } from './components/MarkDistribution';
+import { StudentsManager } from './components/StudentsManager'; // <-- استيراد الملف الجديد
 
-// 2. التعديل الثاني هنا: استخدام createHashRouter
 export const router = createHashRouter([
   {
     path: '/',
@@ -32,6 +31,10 @@ export const router = createHashRouter([
       {
         path: 'mark-distribution',
         Component: MarkDistributionManager,
+      },
+      {
+        path: 'students', // <-- المسار الجديد
+        Component: StudentsManager,
       },
     ],
   },
