@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 
 // مكتبات الـ PDF
 import { Document, Page, pdfjs } from 'react-pdf';
-import { PDFDocument, rgb } from 'pdf-lib'; // <-- المكتبة السحرية الجديدة
+import { PDFDocument, rgb } from 'pdf-lib'; 
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -41,7 +41,6 @@ export function GradingInterface() {
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
   const [activePartId, setActivePartId] = useState<string | null>(null);
   
-  // حالة تحميل لزر الطباعة
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
@@ -121,7 +120,7 @@ export function GradingInterface() {
   const handlePdfClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!activeTool || !pdfWrapperRef.current || !currentPaper) return;
     if (!activePartId) {
-      toast.error('يرجى تحديد السؤال المراد تصحيحه أولاً');
+      toast.error('يرجى تحديد السؤال المراد تصحيحه أولاً من القائمة الجانبية');
       return;
     }
 
@@ -172,7 +171,7 @@ export function GradingInterface() {
     setAnnotations(annotations.filter(a => a.id !== id));
   };
 
-  // --- السحر الجديد: طباعة وحفظ الـ PDF ---
+  // --- التصدير الذكي (يدعم الصور والـ PDF) ---
   const exportGradedPdf = async () => {
     if (!currentPaper || !currentPaper.pdfUrl) {
       toast.error('ملف الاختبار غير موجود!');
@@ -183,59 +182,74 @@ export function GradingInterface() {
     toast.info('جاري دمج العلامات وتجهيز الملف للطباعة...');
 
     try {
-      // 1. جلب ملف الـ PDF الأصلي
-      const existingPdfBytes = await fetch(currentPaper.pdfUrl).then(res => res.arrayBuffer());
-      const pdfDoc = await PDFDocument.load(existingPdfBytes);
-      
-      // نفترض أن المعلم يصحح الصفحة الأولى حالياً (يمكن تطويرها لدعم صفحات متعددة لاحقاً)
-      const pages = pdfDoc.getPages();
-      const page = pages[currentPage - 1]; 
-      const { width, height } = page.getSize();
+      const fileBytes = await fetch(currentPaper.pdfUrl).then(res => res.arrayBuffer());
+      let pdfDoc;
+      let page;
+      let width, height;
 
-      // 2. رسم كل علامة في مكانها الصحيح هندسياً
+      // 1. معالجة نوع الملف (صورة أم PDF)
+      if (currentPaper.fileType === 'image') {
+        pdfDoc = await PDFDocument.create();
+        let imageToEmbed;
+        
+        // محاولة دمجها كـ JPG أو PNG
+        try {
+          imageToEmbed = await pdfDoc.embedJpg(fileBytes);
+        } catch (e) {
+          try {
+            imageToEmbed = await pdfDoc.embedPng(fileBytes);
+          } catch (err) {
+            toast.error('صيغة الصورة غير مدعومة للطباعة (يرجى استخدام JPG أو PNG)');
+            setIsExporting(false);
+            return;
+          }
+        }
+        
+        const dims = imageToEmbed.scale(1);
+        width = dims.width;
+        height = dims.height;
+        page = pdfDoc.addPage([width, height]);
+        page.drawImage(imageToEmbed, { x: 0, y: 0, width, height });
+        
+      } else {
+        pdfDoc = await PDFDocument.load(fileBytes);
+        const pages = pdfDoc.getPages();
+        page = pages[currentPage - 1]; 
+        const size = page.getSize();
+        width = size.width;
+        height = size.height;
+      }
+
+      // 2. رسم العلامات الهندسية (الحبر الأحمر)
       for (const ann of annotations) {
-        // تحويل النسبة المئوية إلى نقاط PDF حقيقية
         const xPos = (ann.x / 100) * width;
-        // الـ PDF يبدأ الإحداثيات من الأسفل للأعلى، لذلك نعكس قيمة الـ Y
         const yPos = height - ((ann.y / 100) * height);
 
         if (ann.type === 'check') {
-          // رسم علامة الصح الخضراء بمسار SVG
           page.drawSvgPath('M -5,5 L 5,15 L 20,-5', {
-            x: xPos,
-            y: yPos,
-            borderColor: rgb(0.1, 0.6, 0.1), // لون أخضر
-            borderWidth: 4,
+            x: xPos, y: yPos, borderColor: rgb(0.1, 0.6, 0.1), borderWidth: 4,
           });
         } else if (ann.type === 'cross') {
-          // رسم علامة الخطأ الحمراء
           page.drawSvgPath('M -10,-10 L 10,10 M 10,-10 L -10,10', {
-            x: xPos,
-            y: yPos,
-            borderColor: rgb(0.8, 0.1, 0.1), // لون أحمر
-            borderWidth: 4,
+            x: xPos, y: yPos, borderColor: rgb(0.8, 0.1, 0.1), borderWidth: 4,
           });
         } else if (ann.type === 'score' && ann.value) {
-          // طباعة الدرجة كنص أحمر
           page.drawText(ann.value, {
-            x: xPos - 10,
-            y: yPos - 10,
-            size: 24,
-            color: rgb(0.8, 0.1, 0.1),
+            x: xPos - 10, y: yPos - 10, size: 24, color: rgb(0.8, 0.1, 0.1),
           });
         }
       }
 
-      // رسم الختم النهائي للمجموع في أعلى يسار الصفحة
+      // رسم المجموع النهائي أعلى يسار الورقة
       const totalScore = calculateTotal();
-      page.drawText(`${totalScore} / ${currentPaper.totalMaxScore}`, {
+      page.drawText(`المجموع: ${totalScore} / ${currentPaper.totalMaxScore}`, {
         x: 40,
         y: height - 50,
-        size: 28,
+        size: 24,
         color: rgb(0.8, 0.1, 0.1),
       });
 
-      // 3. حفظ وتحميل الملف الجديد
+      // 3. التصدير النهائي
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -260,14 +274,14 @@ export function GradingInterface() {
     <div className="flex flex-col items-center justify-center h-[80vh] text-center space-y-4" dir="rtl">
       <CheckCircle className="w-24 h-24 text-green-500 mb-4" />
       <h2 className="text-4xl font-bold">لا توجد أوراق بانتظار التصحيح!</h2>
-      <Button onClick={() => navigate('/dashboard')} size="lg">العودة للوحة التحكم</Button>
+      <Button onClick={() => navigate('/dashboard')} size="lg">عرض النتائج الشاملة</Button>
     </div>
   );
 
   return (
     <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-slate-100" dir="rtl">
       
-      {/* العمود الأيمن (كما هو) */}
+      {/* العمود الأيمن (لوحة الرصد) */}
       <div className="w-[380px] min-w-[350px] bg-white border-l shadow-2xl flex flex-col z-10">
         <div className="p-4 border-b bg-blue-50/50">
           <div className="flex justify-between items-center mb-3">
@@ -275,6 +289,9 @@ export function GradingInterface() {
             <Badge variant="outline">رقم: {currentPaper.studentId}</Badge>
           </div>
           <h2 className="font-bold truncate">{currentPaper.examName}</h2>
+          {currentPaper.fileType === 'image' && (
+            <Badge variant="secondary" className="mt-2 text-xs">نوع الملف: صورة</Badge>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
@@ -322,7 +339,7 @@ export function GradingInterface() {
           ))}
         </div>
 
-        {/* أزرار الحفظ والطباعة الجديدة */}
+        {/* أزرار الحفظ والطباعة */}
         <div className="p-4 border-t bg-slate-50 space-y-3">
           <div className="flex justify-between p-3 bg-white rounded-lg border font-bold text-lg">
             <span>المجموع:</span>
@@ -349,7 +366,7 @@ export function GradingInterface() {
         </div>
       </div>
 
-      {/* العمود الأيسر (كما هو) */}
+      {/* العمود الأيسر (منطقة العرض التفاعلية) */}
       <div className="flex-1 p-4 h-full bg-slate-200 flex flex-col overflow-hidden">
         <div className="bg-white p-2 mb-2 rounded-lg shadow-sm border border-slate-300 flex items-center justify-center gap-4">
           <span className="text-sm font-bold text-slate-500">القلم الحالي:</span>
@@ -379,17 +396,30 @@ export function GradingInterface() {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-auto flex justify-center bg-slate-300 rounded-lg p-4 custom-scrollbar">
+        <div className="flex-1 overflow-auto flex justify-center items-start bg-slate-300 rounded-lg p-4 custom-scrollbar">
           {currentPaper.pdfUrl ? (
             <div 
-              className={`relative shadow-2xl bg-white ${activeTool ? 'cursor-crosshair' : ''}`}
+              // استخدام inline-block لضمان التصاق الـ Div بالصورة/الـ PDF تماماً لضبط الإحداثيات
+              className={`relative shadow-2xl bg-white inline-block ${activeTool ? 'cursor-crosshair' : ''}`}
               ref={pdfWrapperRef}
               onClick={handlePdfClick}
             >
-              <Document file={currentPaper.pdfUrl} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
-                <Page pageNumber={currentPage} renderTextLayer={false} renderAnnotationLayer={false} width={800} />
-              </Document>
+              
+              {/* الريندر الذكي بناءً على نوع الملف */}
+              {currentPaper.fileType === 'image' ? (
+                <img 
+                  src={currentPaper.pdfUrl} 
+                  alt="ورقة الطالب" 
+                  className="block pointer-events-none select-none max-w-full h-auto"
+                  style={{ width: '800px' }} // عرض ثابت للحفاظ على التنسيق
+                />
+              ) : (
+                <Document file={currentPaper.pdfUrl} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
+                  <Page pageNumber={currentPage} renderTextLayer={false} renderAnnotationLayer={false} width={800} />
+                </Document>
+              )}
 
+              {/* طبقة الأختام التفاعلية */}
               {annotations.map(ann => (
                 <div 
                   key={ann.id}
