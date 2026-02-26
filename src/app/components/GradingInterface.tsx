@@ -105,6 +105,7 @@ export function GradingInterface() {
         totalScore: calculateTotal(),
         status: isComplete ? 'completed' : 'in-progress',
         gradedDate: isComplete ? new Date().toISOString() : undefined,
+        annotations, //saveProgress
       };
       localStorage.setItem('fastGrader_papers', JSON.stringify(papers));
 
