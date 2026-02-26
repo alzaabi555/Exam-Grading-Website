@@ -43,11 +43,17 @@ export function UploadPaper() {
     setClasses(uniqueClasses.sort());
     if (uniqueClasses.length > 0) setSelectedClass(uniqueClasses[0]);
 
-    // بما أن دوال التخزين أصبحت Async، يجب جلب القوالب هكذا:
+    // 1. إضافة درع الحماية هنا للتأكد من أن البيانات مصفوفة دائماً
     const fetchDistributions = async () => {
-      const dists = await getMarkDistributions();
-      setDistributions(dists);
-      if (dists.length > 0) setSelectedTemplate(dists[0].examName);
+      try {
+        const dists = await getMarkDistributions();
+        const safeDists = Array.isArray(dists) ? dists : [];
+        setDistributions(safeDists);
+        if (safeDists.length > 0) setSelectedTemplate(safeDists[0].examName);
+      } catch (error) {
+        console.error("خطأ في جلب القوالب:", error);
+        setDistributions([]);
+      }
     };
     fetchDistributions();
   }, []);
@@ -96,7 +102,7 @@ export function UploadPaper() {
     });
   };
 
-  // دالة الاعتماد النهائي (تم تحويلها إلى Async)
+  // دالة الاعتماد النهائي 
   const handleSubmitMappedFiles = async () => {
     if (!selectedTemplate) {
       toast.error('يرجى تحديد قالب توزيع الدرجات');
@@ -122,7 +128,6 @@ export function UploadPaper() {
         const student = students.find(s => s.id === mappedFile.selectedStudentId);
         if (!student) continue;
 
-        // السحر هنا: تحويل الملف إلى Base64
         const base64Data = await convertFileToBase64(mappedFile.file);
         const paperId = `paper-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -152,7 +157,7 @@ export function UploadPaper() {
           studentName: student.name,
           studentId: student.id,
           examName: selectedTemplate,
-          pdfUrl: base64Data, // حفظ البيانات المشفرة بشكل دائم!
+          pdfUrl: base64Data, 
           fileType: mappedFile.fileType,
           uploadDate: new Date().toISOString(),
           questions,
@@ -160,7 +165,7 @@ export function UploadPaper() {
           status: 'pending',
         };
 
-        await addPaper(paper); // نستخدم await لأن الحفظ أصبح يعتمد على المستودع العملاق
+        await addPaper(paper);
         successCount++;
       }
 
@@ -222,19 +227,30 @@ export function UploadPaper() {
           <CardHeader className="bg-green-50/50 pb-4">
             <CardTitle className="text-lg text-green-800">2. إدراج الملفات</CardTitle>
           </CardHeader>
+          {/* 2. تحسين شكل منطقة الرفع لكي تشرح سبب القفل */}
           <CardContent className="pt-4 h-full">
-            <div className="border-2 border-dashed border-green-300 rounded-lg h-[150px] flex flex-col items-center justify-center hover:bg-green-50 transition-colors bg-green-50/20 relative">
+            <div className={`border-2 border-dashed rounded-lg h-[150px] flex flex-col items-center justify-center transition-colors relative ${(!selectedClass || !selectedTemplate) ? 'border-slate-300 bg-slate-50 cursor-not-allowed' : 'border-green-300 hover:bg-green-50 bg-green-50/20'}`}>
               <input
                 type="file"
                 accept="application/pdf, image/jpeg, image/png, image/webp"
                 multiple
                 onChange={handleFileUpload}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
                 disabled={!selectedClass || !selectedTemplate || isSubmitting}
               />
               <Upload className={`w-12 h-12 mb-2 ${(!selectedClass || !selectedTemplate) ? 'text-slate-300' : 'text-green-500'}`} />
-              <p className="font-bold text-slate-700">اضغط أو اسحب أوراق الاختبار هنا</p>
-              <p className="text-xs text-slate-500 mt-1">يدعم ملفات PDF والصور (JPG, PNG)</p>
+              
+              {(!selectedClass || !selectedTemplate) ? (
+                <>
+                  <p className="font-bold text-slate-500">منطقة الرفع مقفلة</p>
+                  <p className="text-xs text-red-500 mt-1 font-bold">الرجاء تحديد (الصف) و (قالب الدرجات) أولاً لتفعيل الرفع</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-slate-700">اضغط أو اسحب أوراق الاختبار هنا</p>
+                  <p className="text-xs text-slate-500 mt-1">يدعم ملفات PDF والصور (JPG, PNG)</p>
+                </>
+              )}
             </div>
           </CardContent>
         </Card>
