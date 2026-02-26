@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Badge } from './ui/badge';
-import { addMarkDistribution, getMarkDistributions, saveMarkDistributions } from '../utils/storage'; // إضافة saveMarkDistributions
+import { addMarkDistribution, getMarkDistributions, saveMarkDistributions } from '../utils/storage';
 import { MarkDistribution } from '../types/exam';
 import { toast } from 'sonner';
 
@@ -19,11 +19,12 @@ export function MarkDistributionManager() {
     loadDistributions();
   }, []);
 
-  // 1. تحويل الدالة إلى async لانتظار المستودع العملاق
+  // 1. الدالة بعد عملية الحماية الجراحية: نضمن دائماً وجود مصفوفة (Array)
   const loadDistributions = async () => {
     try {
       const data = await getMarkDistributions();
-      setDistributions(data);
+      // السطر السحري: إذا كانت البيانات موجودة ومصفوفة ضعها، وإلا ضع مصفوفة فارغة
+      setDistributions(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("خطأ في جلب القوالب:", error);
       setDistributions([]);
@@ -77,7 +78,7 @@ export function MarkDistributionManager() {
     setQuestions(updatedQuestions);
   };
 
-  // 2. تحويل دالة الحفظ لتدعم await
+  // 2. دالة الحفظ
   const handleSave = async () => {
     if (!examName.trim()) {
       toast.error('يرجى إدخال اسم الاختبار');
@@ -118,12 +119,11 @@ export function MarkDistributionManager() {
     toast.success(`تم تحميل قالب "${distribution.examName}" للتعديل`);
   };
 
-  // 3. تعديل دالة الحذف لتقوم بالحفظ الآمن في المستودع العملاق
+  // 3. دالة الحذف
   const deleteTemplate = async (examNameToDelete: string) => {
     if (confirm(`هل أنت متأكد من حذف قالب "${examNameToDelete}" نهائياً؟`)) {
       const updatedDistributions = distributions.filter(d => d.examName !== examNameToDelete);
       setDistributions(updatedDistributions);
-      // استخدام دالة الحفظ الصحيحة بدلاً من localStorage
       await saveMarkDistributions(updatedDistributions);
       toast.success('تم حذف القالب بنجاح');
     }
