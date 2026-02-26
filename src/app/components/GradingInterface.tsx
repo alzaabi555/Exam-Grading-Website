@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { getPapers } from '../utils/storage';
+import { getPapers, savePapers } from '../utils/storage'; // <-- أضفنا savePapers هنا
 import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
 
@@ -47,13 +47,14 @@ export function GradingInterface() {
     loadNextPaper();
   }, []);
 
-  const loadNextPaper = () => {
-    const papers = getPapers();
+  // تحويل الدالة إلى async لتتوافق مع المستودع العملاق
+  const loadNextPaper = async () => {
+    const papers = await getPapers();
     const pendingPaper = papers.find(p => p.status !== 'completed');
     if (pendingPaper) {
       setCurrentPaper(pendingPaper);
       setScores({});
-      setAnnotations([]);
+      setAnnotations(pendingPaper.annotations || []); // سحب العلامات القديمة إن وجدت
       setCurrentPage(1);
       if (pendingPaper.questions.length > 0 && pendingPaper.questions[0].parts.length > 0) {
         setActivePartId(pendingPaper.questions[0].parts[0].id);
@@ -94,9 +95,10 @@ export function GradingInterface() {
     return Object.values(scores).reduce((sum, score) => sum + score, 0);
   };
 
-  const saveProgress = (isComplete: boolean = false) => {
+  // تحويل الدالة إلى async واستخدام savePapers
+  const saveProgress = async (isComplete: boolean = false) => {
     if (!currentPaper) return;
-    const papers = getPapers();
+    const papers = await getPapers();
     const paperIndex = papers.findIndex(p => p.id === currentPaper.id);
 
     if (paperIndex !== -1) {
@@ -105,13 +107,15 @@ export function GradingInterface() {
         totalScore: calculateTotal(),
         status: isComplete ? 'completed' : 'in-progress',
         gradedDate: isComplete ? new Date().toISOString() : undefined,
-        annotations, //saveProgress
+        annotations, // حفظ الحبر الأحمر
       };
-      localStorage.setItem('fastGrader_papers', JSON.stringify(papers));
+      
+      // حفظ البيانات في المستودع العملاق بدلاً من localStorage
+      await savePapers(papers);
 
       if (isComplete) {
         toast.success('تم إنهاء التصحيح!');
-        loadNextPaper();
+        await loadNextPaper();
       } else {
         toast.success('تم الحفظ مؤقتاً.');
       }
@@ -172,7 +176,7 @@ export function GradingInterface() {
     setAnnotations(annotations.filter(a => a.id !== id));
   };
 
-  // --- التصدير الذكي (يدعم الصور والـ PDF) ---
+  // التصدير الذكي (يدعم الصور والـ PDF)
   const exportGradedPdf = async () => {
     if (!currentPaper || !currentPaper.pdfUrl) {
       toast.error('ملف الاختبار غير موجود!');
@@ -188,12 +192,10 @@ export function GradingInterface() {
       let page;
       let width, height;
 
-      // 1. معالجة نوع الملف (صورة أم PDF)
       if (currentPaper.fileType === 'image') {
         pdfDoc = await PDFDocument.create();
         let imageToEmbed;
         
-        // محاولة دمجها كـ JPG أو PNG
         try {
           imageToEmbed = await pdfDoc.embedJpg(fileBytes);
         } catch (e) {
@@ -221,7 +223,6 @@ export function GradingInterface() {
         height = size.height;
       }
 
-      // 2. رسم العلامات الهندسية (الحبر الأحمر)
       for (const ann of annotations) {
         const xPos = (ann.x / 100) * width;
         const yPos = height - ((ann.y / 100) * height);
@@ -241,7 +242,6 @@ export function GradingInterface() {
         }
       }
 
-      // رسم المجموع النهائي أعلى يسار الورقة
       const totalScore = calculateTotal();
       page.drawText(`المجموع: ${totalScore} / ${currentPaper.totalMaxScore}`, {
         x: 40,
@@ -250,7 +250,6 @@ export function GradingInterface() {
         color: rgb(0.8, 0.1, 0.1),
       });
 
-      // 3. التصدير النهائي
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -400,19 +399,17 @@ export function GradingInterface() {
         <div className="flex-1 overflow-auto flex justify-center items-start bg-slate-300 rounded-lg p-4 custom-scrollbar">
           {currentPaper.pdfUrl ? (
             <div 
-              // استخدام inline-block لضمان التصاق الـ Div بالصورة/الـ PDF تماماً لضبط الإحداثيات
               className={`relative shadow-2xl bg-white inline-block ${activeTool ? 'cursor-crosshair' : ''}`}
               ref={pdfWrapperRef}
               onClick={handlePdfClick}
             >
               
-              {/* الريندر الذكي بناءً على نوع الملف */}
               {currentPaper.fileType === 'image' ? (
                 <img 
                   src={currentPaper.pdfUrl} 
                   alt="ورقة الطالب" 
                   className="block pointer-events-none select-none max-w-full h-auto"
-                  style={{ width: '800px' }} // عرض ثابت للحفاظ على التنسيق
+                  style={{ width: '800px' }} 
                 />
               ) : (
                 <Document file={currentPaper.pdfUrl} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
