@@ -6,7 +6,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Badge } from './ui/badge';
-import { addMarkDistribution, getMarkDistributions } from '../utils/storage';
+import { addMarkDistribution, getMarkDistributions, saveMarkDistributions } from '../utils/storage'; // إضافة saveMarkDistributions
 import { MarkDistribution } from '../types/exam';
 import { toast } from 'sonner';
 
@@ -19,8 +19,15 @@ export function MarkDistributionManager() {
     loadDistributions();
   }, []);
 
-  const loadDistributions = () => {
-    setDistributions(getMarkDistributions());
+  // 1. تحويل الدالة إلى async لانتظار المستودع العملاق
+  const loadDistributions = async () => {
+    try {
+      const data = await getMarkDistributions();
+      setDistributions(data);
+    } catch (error) {
+      console.error("خطأ في جلب القوالب:", error);
+      setDistributions([]);
+    }
   };
 
   const addQuestion = () => {
@@ -35,7 +42,6 @@ export function MarkDistributionManager() {
   };
 
   const removeQuestion = (index: number) => {
-    // إعادة ترقيم الأسئلة بعد الحذف للحفاظ على التسلسل
     const updatedQuestions = questions.filter((_, i) => i !== index).map((q, i) => ({
       ...q,
       questionNumber: i + 1
@@ -58,7 +64,6 @@ export function MarkDistributionManager() {
     updatedQuestions[questionIndex].parts = updatedQuestions[questionIndex].parts.filter(
       (_, i) => i !== partIndex
     );
-    // إعادة الترقيم للأجزاء
     updatedQuestions[questionIndex].parts = updatedQuestions[questionIndex].parts.map((p, i) => ({
       ...p,
       partNumber: i + 1
@@ -72,7 +77,8 @@ export function MarkDistributionManager() {
     setQuestions(updatedQuestions);
   };
 
-  const handleSave = () => {
+  // 2. تحويل دالة الحفظ لتدعم await
+  const handleSave = async () => {
     if (!examName.trim()) {
       toast.error('يرجى إدخال اسم الاختبار');
       return;
@@ -97,8 +103,8 @@ export function MarkDistributionManager() {
       questions,
     };
 
-    addMarkDistribution(distribution);
-    loadDistributions();
+    await addMarkDistribution(distribution);
+    await loadDistributions();
     
     setExamName('');
     setQuestions([]);
@@ -112,13 +118,13 @@ export function MarkDistributionManager() {
     toast.success(`تم تحميل قالب "${distribution.examName}" للتعديل`);
   };
 
-  const deleteTemplate = (examNameToDelete: string) => {
+  // 3. تعديل دالة الحذف لتقوم بالحفظ الآمن في المستودع العملاق
+  const deleteTemplate = async (examNameToDelete: string) => {
     if (confirm(`هل أنت متأكد من حذف قالب "${examNameToDelete}" نهائياً؟`)) {
-      // بما أننا لا نملك دالة مسح في storage.ts، سنقوم بتحديثها عبر localStorage مباشرة
       const updatedDistributions = distributions.filter(d => d.examName !== examNameToDelete);
       setDistributions(updatedDistributions);
-      // الافتراض أن هذا هو مفتاح التخزين المستخدم في storage.ts
-      localStorage.setItem('fastGrader_markDistributions', JSON.stringify(updatedDistributions));
+      // استخدام دالة الحفظ الصحيحة بدلاً من localStorage
+      await saveMarkDistributions(updatedDistributions);
       toast.success('تم حذف القالب بنجاح');
     }
   };
@@ -139,7 +145,7 @@ export function MarkDistributionManager() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 items-start">
         
-        {/* --- العمود الأيمن: إنشاء/تعديل التوزيع (يأخذ مساحة أكبر) --- */}
+        {/* --- العمود الأيمن: إنشاء/تعديل التوزيع --- */}
         <div className="lg:col-span-7 space-y-6">
           <Card className="border-blue-100 shadow-md">
             <CardHeader className="bg-blue-50/50 border-b">
@@ -151,7 +157,6 @@ export function MarkDistributionManager() {
             </CardHeader>
             <CardContent className="space-y-6 pt-6">
               
-              {/* اسم الاختبار */}
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                 <Label htmlFor="examName" className="text-lg font-bold mb-2 block">اسم الاختبار المعتمد</Label>
                 <Input
@@ -163,7 +168,6 @@ export function MarkDistributionManager() {
                 />
               </div>
 
-              {/* شريط الأسئلة */}
               <div className="flex justify-between items-center bg-slate-800 text-white p-3 rounded-lg shadow-sm">
                 <Label className="text-lg font-bold">هيكل الأسئلة</Label>
                 <Button type="button" size="sm" onClick={addQuestion} className="bg-blue-600 hover:bg-blue-500">
@@ -256,7 +260,6 @@ export function MarkDistributionManager() {
                 </div>
               )}
 
-              {/* شريط الإجمالي والحفظ */}
               {questions.length > 0 && (
                 <div className="pt-6 border-t mt-4">
                   <div className="flex justify-between items-center mb-4 bg-green-50 p-4 rounded-lg border border-green-200">
