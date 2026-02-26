@@ -19,16 +19,18 @@ export function Dashboard() {
     loadData();
   }, []);
 
-  // تحويل الدالة إلى async لتتوافق مع المستودع العملاق
+  // 1. الدالة بعد وضع "درع الحماية": نضمن أن البيانات مصفوفة دائماً
   const loadData = async () => {
     try {
       const fetchedPapers = await getPapers();
-      setPapers(fetchedPapers);
+      setPapers(Array.isArray(fetchedPapers) ? fetchedPapers : []);
       
       const fetchedDistributions = await getMarkDistributions();
-      setDistributions(fetchedDistributions);
+      setDistributions(Array.isArray(fetchedDistributions) ? fetchedDistributions : []);
     } catch (error) {
       console.error("حدث خطأ أثناء تحميل البيانات:", error);
+      setPapers([]);
+      setDistributions([]);
       toast.error('حدث خطأ أثناء تحميل أوراق الاختبار.');
     }
   };
