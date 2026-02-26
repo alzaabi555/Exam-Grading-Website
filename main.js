@@ -6,6 +6,17 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ---------------------------------------------------------------
+// السطر السحري الجراحي: جعل قاعدة البيانات محمولة 100%
+// ---------------------------------------------------------------
+if (app.isPackaged) {
+  // نجلب مسار المجلد الذي يتواجد فيه ملف الـ .exe حالياً
+  const exePath = path.dirname(app.getPath('exe'));
+  // نجبر Electron على حفظ قاعدة بياناته (المستودع العملاق) داخل مجلد بجوار البرنامج
+  app.setPath('userData', path.join(exePath, 'FastGrader_Data'));
+}
+// ---------------------------------------------------------------
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
