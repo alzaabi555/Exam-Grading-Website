@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { FileText, Trash2, Eye, BarChart3, Upload, Settings, Users } from 'lucide-react';
+import { FileText, Trash2, Eye, BarChart3, Upload, Settings } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
@@ -9,38 +9,37 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { getPapers, deletePaper, getMarkDistributions } from '../utils/storage';
 import { ExamPaper, MarkDistribution } from '../types/exam';
 import { toast } from 'sonner';
-import { StudentImporter, Student } from './StudentImporter'; // إضافة مكون الاستيراد
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [papers, setPapers] = useState<ExamPaper[]>([]);
   const [distributions, setDistributions] = useState<MarkDistribution[]>([]);
-  const [students, setStudents] = useState<Student[]>([]); // حالة حفظ الطلاب
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setPapers(getPapers());
-    setDistributions(getMarkDistributions());
-    // جلب الطلاب المحفوظين مسبقاً
-    const storedStudents = JSON.parse(localStorage.getItem('fastGrader_students') || '[]');
-    setStudents(storedStudents);
-  };
-
-  const handleDelete = (paperId: string) => {
-    if (confirm('هل أنت متأكد من حذف هذه الورقة؟')) {
-      deletePaper(paperId);
-      loadData();
-      toast.success('تم حذف الورقة بنجاح');
+  // تحويل الدالة إلى async لتتوافق مع المستودع العملاق
+  const loadData = async () => {
+    try {
+      const fetchedPapers = await getPapers();
+      setPapers(fetchedPapers);
+      
+      const fetchedDistributions = await getMarkDistributions();
+      setDistributions(fetchedDistributions);
+    } catch (error) {
+      console.error("حدث خطأ أثناء تحميل البيانات:", error);
+      toast.error('حدث خطأ أثناء تحميل أوراق الاختبار.');
     }
   };
 
-  // دالة استلام الطلاب من ملف الإكسل وحفظهم
-  const handleStudentsImported = (importedStudents: Student[]) => {
-    setStudents(importedStudents);
-    localStorage.setItem('fastGrader_students', JSON.stringify(importedStudents));
+  // تحويل دالة الحذف إلى async
+  const handleDelete = async (paperId: string) => {
+    if (confirm('هل أنت متأكد من حذف هذه الورقة بشكل نهائي؟')) {
+      await deletePaper(paperId);
+      await loadData();
+      toast.success('تم حذف الورقة بنجاح');
+    }
   };
 
   const getStatusBadge = (status: ExamPaper['status']) => {
@@ -57,13 +56,13 @@ export function Dashboard() {
     };
 
     const colors = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      'in-progress': 'bg-blue-100 text-blue-800',
-      completed: 'bg-green-100 text-green-800',
+      pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      'in-progress': 'bg-blue-100 text-blue-800 border-blue-200',
+      completed: 'bg-green-100 text-green-800 border-green-200',
     };
 
     return (
-      <Badge variant={variants[status]} className={colors[status]}>
+      <Badge variant={variants[status]} className={`${colors[status]} px-3 py-1 font-bold`}>
         {labels[status]}
       </Badge>
     );
@@ -93,185 +92,94 @@ export function Dashboard() {
   return (
     <div className="container mx-auto p-6 max-w-7xl text-right" dir="rtl">
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
           <div>
-            <h1 className="text-3xl font-bold mb-2">لوحة تحكم التصحيح</h1>
-            <p className="text-gray-600">إدارة أوراق الاختبار وعرض إحصائيات التصحيح</p>
+            <h1 className="text-3xl font-bold mb-2 text-slate-800">لوحة تحكم النتائج</h1>
+            <p className="text-gray-600">نظرة شاملة على أوراق الاختبار والنتائج المكتملة</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate('/mark-distribution')}>
+            <Button variant="outline" onClick={() => navigate('/mark-distribution')} className="border-blue-200 text-blue-700 hover:bg-blue-50">
               <Settings className="w-4 h-4 ml-2" />
               توزيع الدرجات
             </Button>
-            <Button onClick={() => navigate('/')}>
+            <Button onClick={() => navigate('/')} className="bg-slate-800 hover:bg-slate-900">
               <Upload className="w-4 h-4 ml-2" />
-              رفع ورقة جديدة
+              رفع أوراق جديدة
             </Button>
           </div>
         </div>
 
         {/* كروت الإحصائيات */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-          <Card>
+          <Card className="shadow-sm border-slate-200">
             <CardContent className="p-6">
-              <div className="text-2xl font-bold">{stats.total}</div>
-              <div className="text-sm text-gray-600">إجمالي الأوراق</div>
+              <div className="text-3xl font-black text-slate-700">{stats.total}</div>
+              <div className="text-sm font-bold text-slate-500 mt-1">إجمالي الأوراق</div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="shadow-sm border-yellow-200 bg-yellow-50/30">
             <CardContent className="p-6">
-              <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-              <div className="text-sm text-gray-600">قيد الانتظار</div>
+              <div className="text-3xl font-black text-yellow-600">{stats.pending}</div>
+              <div className="text-sm font-bold text-yellow-700 mt-1">قيد الانتظار</div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="shadow-sm border-blue-200 bg-blue-50/30">
             <CardContent className="p-6">
-              <div className="text-2xl font-bold text-blue-600">{stats.inProgress}</div>
-              <div className="text-sm text-gray-600">جاري العمل</div>
+              <div className="text-3xl font-black text-blue-600">{stats.inProgress}</div>
+              <div className="text-sm font-bold text-blue-700 mt-1">جاري التصحيح</div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="shadow-sm border-green-200 bg-green-50/30">
             <CardContent className="p-6">
-              <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
-              <div className="text-sm text-gray-600">مكتملة</div>
+              <div className="text-3xl font-black text-green-600">{stats.completed}</div>
+              <div className="text-sm font-bold text-green-700 mt-1">مكتملة وجاهزة</div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="shadow-sm border-slate-200">
             <CardContent className="p-6">
-              <div className="text-2xl font-bold">{stats.avgScore.toFixed(1)}%</div>
-              <div className="text-sm text-gray-600">متوسط الدرجات</div>
+              <div className="text-3xl font-black text-slate-700">{stats.avgScore.toFixed(1)}%</div>
+              <div className="text-sm font-bold text-slate-500 mt-1">متوسط أداء الطلاب</div>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      <Tabs defaultValue="papers" className="space-y-4">
-        <TabsList className="flex justify-start">
-          <TabsTrigger value="papers">أوراق الاختبارات</TabsTrigger>
-          <TabsTrigger value="results">نتائج الطلاب</TabsTrigger>
-          {/* التبويب الجديد للطلاب */}
-          <TabsTrigger value="students" className="gap-2">
-            <Users className="w-4 h-4" />
-            إدارة الطلاب
-          </TabsTrigger>
+      <Tabs defaultValue="results" className="space-y-4">
+        <TabsList className="flex justify-start bg-slate-100 p-1 rounded-lg">
+          <TabsTrigger value="results" className="text-md px-6 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">نتائج الطلاب المكتملة</TabsTrigger>
+          <TabsTrigger value="papers" className="text-md px-6 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">سجل الأوراق المرفوعة</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="papers">
-          {/* ... الكود الخاص بأوراق الاختبار كما هو بدون أي تغيير ... */}
-          <Card>
-            <CardHeader>
-              <CardTitle>جميع أوراق الاختبار</CardTitle>
-              <CardDescription>عرض وإدارة أوراق الاختبار المرفوعة</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {papers.length === 0 ? (
-                <div className="text-center py-12">
-                  <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-600 mb-4">لا توجد أوراق مرفوعة حتى الآن</p>
-                  <Button onClick={() => navigate('/')}>
-                    <Upload className="w-4 h-4 ml-2" />
-                    رفع أول ورقة
-                  </Button>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-right">اسم الطالب</TableHead>
-                        <TableHead className="text-right">رقم الطالب</TableHead>
-                        <TableHead className="text-right">اسم الاختبار</TableHead>
-                        <TableHead className="text-right">الأسئلة</TableHead>
-                        <TableHead className="text-right">الدرجة</TableHead>
-                        <TableHead className="text-right">الحالة</TableHead>
-                        <TableHead className="text-right">تاريخ الرفع</TableHead>
-                        <TableHead className="text-left">إجراءات</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {papers.map(paper => (
-                        <TableRow key={paper.id}>
-                          <TableCell className="font-medium">{paper.studentName}</TableCell>
-                          <TableCell>{paper.studentId}</TableCell>
-                          <TableCell>{paper.examName}</TableCell>
-                          <TableCell>{paper.questions.length}</TableCell>
-                          <TableCell>
-                            {paper.totalScore !== undefined
-                              ? `${paper.totalScore}/${paper.totalMaxScore}`
-                              : `—/${paper.totalMaxScore}`}
-                          </TableCell>
-                          <TableCell>{getStatusBadge(paper.status)}</TableCell>
-                          <TableCell>
-                            {new Date(paper.uploadDate).toLocaleDateString('ar-EG')}
-                          </TableCell>
-                          <TableCell className="text-left">
-                            <div className="flex justify-start gap-2">
-                              {paper.status !== 'completed' && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => navigate('/grade')}
-                                >
-                                  تصحيح
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => navigate(`/results/${paper.id}`)}
-                                title="عرض التفاصيل"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(paper.id)}
-                                title="حذف"
-                              >
-                                <Trash2 className="w-4 h-4 text-red-500" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
+        {/* --- التبويب الأول: نتائج الطلاب --- */}
         <TabsContent value="results">
-          {/* ... الكود الخاص بالنتائج كما هو بدون تغيير ... */}
-          <Card>
-            <CardHeader>
-              <CardTitle>نتائج الطلاب</CardTitle>
-              <CardDescription>عرض نتائج الاختبارات المكتملة حسب الطالب</CardDescription>
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="bg-slate-50 border-b pb-4">
+              <CardTitle className="text-xl text-slate-800">سجل النتائج النهائية</CardTitle>
+              <CardDescription>عرض وطباعة شهادات الاختبارات التي تم الانتهاء من تصحيحها</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               {papers.filter(p => p.status === 'completed').length === 0 ? (
-                <div className="text-center py-12">
-                  <BarChart3 className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-600 mb-4">لا توجد اختبارات مكتملة بعد</p>
-                  <Button onClick={() => navigate('/grade')}>ابدأ التصحيح</Button>
+                <div className="text-center py-16 bg-slate-50/50">
+                  <BarChart3 className="w-16 h-16 mx-auto mb-4 text-slate-300" />
+                  <p className="text-lg font-bold text-slate-600 mb-2">لا توجد نتائج مكتملة بعد</p>
+                  <p className="text-sm text-slate-500 mb-6">قم بتصحيح الأوراق التي قمت برفعها لتظهر نتائجها هنا</p>
+                  <Button onClick={() => navigate('/grade')} className="bg-blue-600 hover:bg-blue-700">الذهاب لغرفة التصحيح</Button>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <TableRow>
-                        <TableHead className="text-right">اسم الطالب</TableHead>
-                        <TableHead className="text-right">رقم الطالب</TableHead>
-                        <TableHead className="text-right">اسم الاختبار</TableHead>
-                        <TableHead className="text-right">إجمالي الدرجة</TableHead>
-                        <TableHead className="text-right">النسبة المئوية</TableHead>
-                        <TableHead className="text-right">تاريخ التصحيح</TableHead>
-                        <TableHead className="text-left">إجراءات</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">اسم الطالب</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">الرقم التعريفي</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">الاختبار المعتمد</TableHead>
+                        <TableHead className="text-center font-bold text-slate-600">الدرجة</TableHead>
+                        <TableHead className="text-center font-bold text-slate-600">النسبة</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">تاريخ الإنجاز</TableHead>
+                        <TableHead className="text-center font-bold text-slate-600">الشهادة</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody>
+                    <TableBody className="divide-y divide-slate-100">
                       {papers
                         .filter(p => p.status === 'completed')
                         .map(paper => {
@@ -280,35 +188,36 @@ export function Dashboard() {
                             : 0;
                           
                           return (
-                            <TableRow key={paper.id}>
-                              <TableCell className="font-medium">{paper.studentName}</TableCell>
-                              <TableCell>{paper.studentId}</TableCell>
-                              <TableCell>{paper.examName}</TableCell>
-                              <TableCell>
-                                {paper.totalScore}/{paper.totalMaxScore}
+                            <TableRow key={paper.id} className="hover:bg-blue-50/30 transition-colors">
+                              <TableCell className="font-bold text-blue-900">{paper.studentName}</TableCell>
+                              <TableCell className="text-slate-600 font-mono">{paper.studentId}</TableCell>
+                              <TableCell className="font-medium text-slate-700">{paper.examName}</TableCell>
+                              <TableCell className="text-center">
+                                <span className="font-bold text-lg text-slate-800">{paper.totalScore}</span>
+                                <span className="text-xs text-slate-400 ml-1">/ {paper.totalMaxScore}</span>
                               </TableCell>
-                              <TableCell>
-                                <span className={
-                                  percentage >= 70 ? 'text-green-600 font-bold' :
-                                  percentage >= 50 ? 'text-yellow-600 font-bold' :
-                                  'text-red-600 font-bold'
-                                }>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className={`border-none ${
+                                  percentage >= 80 ? 'bg-green-100 text-green-700' :
+                                  percentage >= 60 ? 'bg-blue-100 text-blue-700' :
+                                  percentage >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-red-100 text-red-700'
+                                }`}>
                                   {percentage.toFixed(1)}%
-                                </span>
+                                </Badge>
                               </TableCell>
-                              <TableCell>
-                                {paper.gradedDate 
-                                  ? new Date(paper.gradedDate).toLocaleDateString('ar-EG')
-                                  : '—'}
+                              <TableCell className="text-sm text-slate-500">
+                                {paper.gradedDate ? new Date(paper.gradedDate).toLocaleDateString('ar-EG') : '—'}
                               </TableCell>
-                              <TableCell className="text-left">
+                              <TableCell className="text-center">
                                 <Button
-                                  variant="outline"
+                                  variant="ghost"
                                   size="sm"
+                                  className="text-blue-600 hover:bg-blue-100"
                                   onClick={() => navigate(`/results/${paper.id}`)}
                                 >
                                   <Eye className="w-4 h-4 ml-2" />
-                                  عرض التفاصيل
+                                  عرض وطباعة
                                 </Button>
                               </TableCell>
                             </TableRow>
@@ -322,41 +231,79 @@ export function Dashboard() {
           </Card>
         </TabsContent>
 
-        {/* --- محتوى التبويب الجديد: إدارة الطلاب --- */}
-        <TabsContent value="students">
-          <Card>
-            <CardHeader>
-              <CardTitle>قائمة الطلاب</CardTitle>
-              <CardDescription>قم برفع كشف إكسل لإضافة الطلاب بسرعة لتسهيل عملية ربط أوراق الاختبار</CardDescription>
+        {/* --- التبويب الثاني: سجل جميع الأوراق --- */}
+        <TabsContent value="papers">
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="bg-slate-50 border-b pb-4">
+              <CardTitle className="text-xl text-slate-800">سجل الأوراق المرفوعة</CardTitle>
+              <CardDescription>متابعة حالة جميع الأوراق التي تم ربطها بالطلاب</CardDescription>
             </CardHeader>
-            <CardContent>
-              {/* مكون زر رفع ملف الإكسل */}
-              <div className="mb-6">
-                <StudentImporter onImportSuccess={handleStudentsImported} />
-              </div>
-
-              {students.length === 0 ? (
-                <div className="text-center py-8 bg-slate-50 rounded-lg border border-dashed border-slate-300">
-                  <Users className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-                  <p className="text-slate-500">لم يتم استيراد أي طلاب بعد. قم برفع ملف إكسل لتبدأ.</p>
+            <CardContent className="p-0">
+              {papers.length === 0 ? (
+                <div className="text-center py-16 bg-slate-50/50">
+                  <FileText className="w-16 h-16 mx-auto mb-4 text-slate-300" />
+                  <p className="text-lg font-bold text-slate-600 mb-2">لا توجد أوراق مرفوعة حتى الآن</p>
+                  <Button onClick={() => navigate('/')} className="mt-4">
+                    <Upload className="w-4 h-4 ml-2" />
+                    رفع أول مجموعة أوراق
+                  </Button>
                 </div>
               ) : (
-                <div className="overflow-x-auto border rounded-md">
+                <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
                   <Table>
-                    <TableHeader className="bg-slate-50">
+                    <TableHeader className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <TableRow>
-                        <TableHead className="text-right">الرقم التعريفي</TableHead>
-                        <TableHead className="text-right">اسم الطالب</TableHead>
-                        <TableHead className="text-right">الصف / الشعبة</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">اسم الطالب</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">الرقم</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">الاختبار</TableHead>
+                        <TableHead className="text-center font-bold text-slate-600">الحالة</TableHead>
+                        <TableHead className="text-right font-bold text-slate-600">تاريخ الرفع</TableHead>
+                        <TableHead className="text-left font-bold text-slate-600">إجراءات</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody>
-                      {students.map((student) => (
-                        <TableRow key={student.id}>
-                          <TableCell className="font-medium text-blue-600">{student.id}</TableCell>
-                          <TableCell>{student.name}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{student.className || 'غير محدد'}</Badge>
+                    <TableBody className="divide-y divide-slate-100">
+                      {papers.map(paper => (
+                        <TableRow key={paper.id} className="hover:bg-slate-50 transition-colors">
+                          <TableCell className="font-bold text-slate-700">{paper.studentName}</TableCell>
+                          <TableCell className="text-slate-500 font-mono">{paper.studentId}</TableCell>
+                          <TableCell className="text-slate-600">{paper.examName}</TableCell>
+                          <TableCell className="text-center">{getStatusBadge(paper.status)}</TableCell>
+                          <TableCell className="text-sm text-slate-500">
+                            {new Date(paper.uploadDate).toLocaleDateString('ar-EG')}
+                          </TableCell>
+                          <TableCell className="text-left">
+                            <div className="flex justify-end gap-2">
+                              {paper.status !== 'completed' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-blue-200 text-blue-700 hover:bg-blue-50"
+                                  onClick={() => navigate('/grade')}
+                                >
+                                  تصحيح الآن
+                                </Button>
+                              )}
+                              {paper.status === 'completed' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-slate-600 hover:text-blue-600"
+                                  onClick={() => navigate(`/results/${paper.id}`)}
+                                  title="عرض التفاصيل"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(paper.id)}
+                                className="text-red-400 hover:text-red-600 hover:bg-red-50"
+                                title="حذف نهائي"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
