@@ -1,110 +1,129 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, Plus, Trash2, FileText, Users, CheckCircle, AlertCircle, Layers } from 'lucide-react';
+import { Upload, Plus, AlertCircle, CheckCircle, Image as ImageIcon, FileText, Link as LinkIcon } from 'lucide-react';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
-import { QuickStats } from './QuickStats';
-import { addPaper, getMarkDistributionByExam } from '../utils/storage';
-import { ExamPaper, Question, AnswerPart } from '../types/exam';
+import { addPaper, getMarkDistributions } from '../utils/storage';
+import { ExamPaper, Question, AnswerPart, MarkDistribution } from '../types/exam';
 import { toast } from 'sonner';
 
-// واجهة لملفات الرفع الجماعي
-interface BulkFile {
+interface Student {
+  id: string;
+  name: string;
+  className?: string;
+}
+
+interface UploadedFile {
   file: File;
-  studentId: string;
-  studentName: string;
-  isMatched: boolean;
+  previewUrl: string;
+  fileType: 'pdf' | 'image';
+  selectedStudentId: string; // ID الطالب المربوط (إن وجد)
 }
 
 export function UploadPaper() {
   const navigate = useNavigate();
-  const [students, setStudents] = useState<any[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<string[]>([]);
+  const [distributions, setDistributions] = useState<MarkDistribution[]>([]);
   
-  // حالات الرفع الفردي
-  const [studentName, setStudentName] = useState('');
-  const [studentId, setStudentId] = useState('');
-  const [examName, setExamName] = useState('');
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  // حالات الإعدادات
+  const [selectedClass, setSelectedClass] = useState<string>('');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   
-  // حالات الرفع الجماعي
-  const [bulkFiles, setBulkFiles] = useState<BulkFile[]>([]);
-  
-  // جلب الطلاب عند فتح الصفحة
+  // حالات الملفات
+  const [filesToMap, setFilesToMap] = useState<UploadedFile[]>([]);
+
+  // تحميل البيانات الأساسية
   useEffect(() => {
     const storedStudents = JSON.parse(localStorage.getItem('fastGrader_students') || '[]');
     setStudents(storedStudents);
+    
+    const uniqueClasses = Array.from(new Set(storedStudents.map((s: Student) => s.className || 'غير مصنف'))) as string[];
+    setClasses(uniqueClasses.sort());
+    if (uniqueClasses.length > 0) setSelectedClass(uniqueClasses[0]);
+
+    const dists = getMarkDistributions();
+    setDistributions(dists);
+    if (dists.length > 0) setSelectedTemplate(dists[0].examName);
   }, []);
 
-  // دالة مطابقة الملفات مع الطلاب
-  const handleBulkPdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // دالة استقبال الملفات ومحاولة المطابقة الآلية
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
 
-    const filesArray = Array.from(e.target.files);
-    const matchedFiles = filesArray.map(file => {
-      // استخراج أي أرقام من اسم الملف (مثال: 1001.pdf -> 1001)
+    const classStudents = students.filter(s => (s.className || 'غير مصنف') === selectedClass);
+    const newFiles: UploadedFile[] = Array.from(e.target.files).map(file => {
+      const isPdf = file.type === 'application/pdf';
+      const fileType = isPdf ? 'pdf' : 'image';
+      
+      // محاولة التخمين الآلي: هل اسم الملف يحتوي على رقم تعريفي لأحد طلاب هذا الصف؟
       const match = file.name.match(/\d+/);
       const extractedId = match ? match[0] : '';
-      
-      // البحث عن الطالب في قاعدة البيانات
-      const student = students.find(s => s.id === extractedId);
-      
+      const matchedStudent = classStudents.find(s => s.id === extractedId);
+
       return {
         file,
-        studentId: extractedId,
-        studentName: student ? student.name : 'طالب غير مسجل',
-        isMatched: !!student,
+        previewUrl: URL.createObjectURL(file),
+        fileType,
+        selectedStudentId: matchedStudent ? matchedStudent.id : '' // ربط آلي إذا وجده، أو يتركه فارغاً
       };
     });
 
-    setBulkFiles(matchedFiles);
-    
-    const matchedCount = matchedFiles.filter(f => f.isMatched).length;
-    toast.success(`تم اختيار ${matchedFiles.length} ملف، والتعرف على ${matchedCount} طالب.`);
+    setFilesToMap([...filesToMap, ...newFiles]);
+    toast.success(`تم إدراج ${newFiles.length} ملف لجدول المطابقة.`);
   };
 
-  // دالة الإرسال الجماعي الذكي
-  const handleBulkSubmit = async () => {
-    if (!examName) {
-      toast.error('يرجى إدخال اسم الاختبار (ليتم ربطه بقالب الدرجات)');
+  // تغيير ربط الطالب يدوياً من القائمة المنسدلة
+  const handleStudentSelect = (index: number, studentId: string) => {
+    const updated = [...filesToMap];
+    updated[index].selectedStudentId = studentId;
+    setFilesToMap(updated);
+  };
+
+  // مسح ملف من القائمة
+  const removeFile = (index: number) => {
+    setFilesToMap(filesToMap.filter((_, i) => i !== index));
+  };
+
+  // الاعتماد النهائي ورفع الأوراق المرتبطة فقط
+  const handleSubmitMappedFiles = () => {
+    if (!selectedTemplate) {
+      toast.error('يرجى تحديد قالب توزيع الدرجات');
       return;
     }
 
-    if (bulkFiles.length === 0) {
-      toast.error('يرجى اختيار ملفات PDF أولاً');
-      return;
-    }
+    const template = distributions.find(d => d.examName === selectedTemplate);
+    if (!template) return;
 
-    const distribution = getMarkDistributionByExam(examName);
-    if (!distribution) {
-      toast.error('يجب إنشاء "توزيع درجات" لهذا الاختبار أولاً من الإعدادات!');
+    // تصفية الملفات التي تم ربطها بطالب فقط
+    const readyFiles = filesToMap.filter(f => f.selectedStudentId !== '');
+    
+    if (readyFiles.length === 0) {
+      toast.error('يرجى ربط ملف واحد على الأقل بطالب!');
       return;
     }
 
     let successCount = 0;
 
-    // معالجة كل ملف وإنشاء ورقة اختبار له
-    bulkFiles.forEach(bulkFile => {
-      if (!bulkFile.isMatched && !bulkFile.studentId) return; // تخطي الملفات التي ليس لها رقم
+    readyFiles.forEach(mappedFile => {
+      const student = students.find(s => s.id === mappedFile.selectedStudentId);
+      if (!student) return;
 
       const paperId = `paper-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const pdfUrl = URL.createObjectURL(bulkFile.file);
 
-      // توليد هيكل الأسئلة والدرجات من القالب مباشرة (بدون صور مقصوصة)
-      const questions: Question[] = distribution.questions.map(q => {
+      // توليد الأسئلة من القالب
+      const questions: Question[] = template.questions.map(q => {
         const questionId = `q${q.questionNumber}-${paperId}`;
         const parts: AnswerPart[] = q.parts.map(p => ({
           id: `p${p.partNumber}-${questionId}`,
           questionId,
           paperId,
           partNumber: p.partNumber,
-          imageUrl: '', // نتركها فارغة، لأننا سنعرض الـ PDF الكامل في واجهة التصحيح
+          imageUrl: '', 
           maxScore: p.maxScore,
         }));
-
         return {
           id: questionId,
           paperId,
@@ -118,10 +137,11 @@ export function UploadPaper() {
 
       const paper: ExamPaper = {
         id: paperId,
-        studentName: bulkFile.studentName,
-        studentId: bulkFile.studentId,
-        examName,
-        pdfUrl,
+        studentName: student.name,
+        studentId: student.id,
+        examName: selectedTemplate,
+        pdfUrl: mappedFile.previewUrl,
+        fileType: mappedFile.fileType, // تخزين نوع الملف ليفهمه المصحح لاحقاً
         uploadDate: new Date().toISOString(),
         questions,
         totalMaxScore,
@@ -132,141 +152,163 @@ export function UploadPaper() {
       successCount++;
     });
 
-    toast.success(`تم إنشاء ورفع ${successCount} ورقة اختبار بنجاح!`);
-    setBulkFiles([]); // تفريغ القائمة
-    navigate('/dashboard'); // العودة للوحة التحكم
+    toast.success(`تم ربط ورفع ${successCount} ورقة اختبار بنجاح واحترافية!`);
+    setFilesToMap([]); // تفريغ الجدول بعد النجاح
+    navigate('/grade'); // الانتقال مباشرة لغرفة التصحيح
   };
 
-  // (تم اختصار دالة الرفع الفردي القديمة للحفاظ على نظافة الكود)
-  const handleSingleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    toast.error('يرجى استخدام الرفع الجماعي مع قالب الدرجات لضمان السرعة.');
-  };
+  const classStudentsList = students.filter(s => (s.className || 'غير مصنف') === selectedClass);
 
   return (
     <div className="container mx-auto p-6 max-w-5xl text-right" dir="rtl">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">رفع أوراق الاختبار</h1>
-        <p className="text-gray-600">قم برفع أوراق الطلاب وربطها بقوالب التصحيح آلياً</p>
+        <h1 className="text-3xl font-bold mb-2 text-slate-800">محطة مطابقة الأوراق</h1>
+        <p className="text-slate-500">اربط أوراق الاختبار الممسوحة ضوئياً بأسماء الطلاب بدقة قبل التصحيح</p>
       </div>
 
-      <div className="mb-6">
-        <QuickStats />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        {/* إعدادات الإطار */}
+        <Card className="border-blue-100 shadow-sm">
+          <CardHeader className="bg-blue-50/50 pb-4">
+            <CardTitle className="text-lg text-blue-800">1. تحديد الإطار</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            <div>
+              <Label className="font-bold mb-2 block">اختر الصف / الشعبة المستهدفة</Label>
+              <select 
+                className="w-full p-3 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                value={selectedClass}
+                onChange={(e) => {
+                  setSelectedClass(e.target.value);
+                  setFilesToMap([]); // تصفير الملفات عند تغيير الصف لمنع اختلاط الطلاب
+                }}
+              >
+                {classes.length === 0 ? <option value="">لا توجد فصول (ارفع قائمة طلاب أولاً)</option> : null}
+                {classes.map(c => <option key={c} value={c}>صف: {c}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label className="font-bold mb-2 block">اختر قالب الدرجات للاختبار</Label>
+              <select 
+                className="w-full p-3 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                value={selectedTemplate}
+                onChange={(e) => setSelectedTemplate(e.target.value)}
+              >
+                {distributions.length === 0 ? <option value="">لم تقم بإنشاء قوالب درجات بعد</option> : null}
+                {distributions.map(d => <option key={d.examName} value={d.examName}>اختبار: {d.examName}</option>)}
+              </select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* منطقة رفع الملفات */}
+        <Card className="border-green-100 shadow-sm">
+          <CardHeader className="bg-green-50/50 pb-4">
+            <CardTitle className="text-lg text-green-800">2. إدراج الملفات</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 h-full">
+            <div className="border-2 border-dashed border-green-300 rounded-lg h-[150px] flex flex-col items-center justify-center hover:bg-green-50 transition-colors bg-green-50/20 relative">
+              <input
+                type="file"
+                accept="application/pdf, image/jpeg, image/png, image/webp"
+                multiple
+                onChange={handleFileUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                disabled={!selectedClass || !selectedTemplate}
+              />
+              <Upload className={`w-12 h-12 mb-2 ${(!selectedClass || !selectedTemplate) ? 'text-slate-300' : 'text-green-500'}`} />
+              <p className="font-bold text-slate-700">اضغط أو اسحب أوراق الاختبار هنا</p>
+              <p className="text-xs text-slate-500 mt-1">يدعم ملفات PDF والصور (JPG, PNG)</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <Card className="mb-6 border-blue-200 shadow-md">
-        <CardHeader className="bg-blue-50/50">
-          <CardTitle>الإعدادات الأساسية (مطلوبة)</CardTitle>
-          <CardDescription>حدد اسم الاختبار لكي يتم ربطه بقالب توزيع الدرجات الخاص به</CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="space-y-2">
-            <Label htmlFor="examName" className="font-bold">اسم الاختبار المعتمد</Label>
-            <Input
-              id="examName"
-              value={examName}
-              onChange={(e) => setExamName(e.target.value)}
-              placeholder="يجب أن يطابق الاسم الموجود في قسم (توزيع الدرجات)"
-              className="text-lg py-6 border-blue-300"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Tabs defaultValue="bulk" className="space-y-4">
-        <TabsList className="flex justify-start">
-          <TabsTrigger value="bulk" className="gap-2 text-lg py-3">
-            <Layers className="w-5 h-5" />
-            الرفع الجماعي الذكي (مستحسن)
-          </TabsTrigger>
-          <TabsTrigger value="single" className="gap-2">
-            <FileText className="w-4 h-4" />
-            رفع ورقة مفردة
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="bulk">
-          <Card>
-            <CardHeader>
-              <CardTitle>رفع ملفات PDF متعددة</CardTitle>
-              <CardDescription>
-                اختر جميع أوراق الاختبار (تأكد أن اسم كل ملف يحتوي على الرقم التعريفي للطالب، مثلاً 1005.pdf)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="border-2 border-dashed border-green-300 rounded-lg p-10 text-center hover:bg-green-50 transition-colors bg-green-50/20">
-                <Input
-                  type="file"
-                  accept="application/pdf"
-                  multiple
-                  onChange={handleBulkPdfUpload}
-                  className="hidden"
-                  id="bulk-pdf-upload"
-                />
-                <Label htmlFor="bulk-pdf-upload" className="cursor-pointer block">
-                  <Upload className="w-16 h-16 mx-auto mb-4 text-green-500" />
-                  <p className="text-xl text-green-700 font-bold mb-2">اضغط لاختيار جميع أوراق الطلاب (PDF)</p>
-                  <p className="text-sm text-gray-500">يمكنك تحديد مئات الملفات دفعة واحدة</p>
-                </Label>
-              </div>
-
-              {/* قائمة الملفات المطابقة */}
-              {bulkFiles.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
-                  <div className="bg-slate-100 p-3 font-bold flex justify-between items-center">
-                    <span>الملفات المحددة ({bulkFiles.length})</span>
-                    <Badge variant="outline" className="bg-white">
-                      متطابق: {bulkFiles.filter(f => f.isMatched).length} | غير معروف: {bulkFiles.filter(f => !f.isMatched).length}
-                    </Badge>
-                  </div>
-                  <div className="max-h-64 overflow-y-auto p-4 space-y-2">
-                    {bulkFiles.map((file, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 border rounded bg-white">
+      {/* جدول المطابقة اليدوية / الآلية */}
+      {filesToMap.length > 0 && (
+        <Card className="shadow-md border-slate-200">
+          <CardHeader className="bg-slate-800 text-white flex flex-row items-center justify-between py-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <LinkIcon className="w-5 h-5 text-blue-400" />
+              3. جدول المطابقة والربط
+            </CardTitle>
+            <Badge className="bg-blue-600 text-white text-md px-3 py-1">
+              {filesToMap.filter(f => f.selectedStudentId !== '').length} من {filesToMap.length} جاهز للرفع
+            </Badge>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="max-h-[400px] overflow-y-auto">
+              <table className="w-full text-right">
+                <thead className="bg-slate-50 sticky top-0 border-b z-10">
+                  <tr>
+                    <th className="p-3 font-bold text-slate-600">ملف الورقة</th>
+                    <th className="p-3 font-bold text-slate-600 w-1/2">ربط بـ (طالب من {selectedClass})</th>
+                    <th className="p-3 text-center font-bold text-slate-600">إجراء</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filesToMap.map((mappedFile, idx) => (
+                    <tr key={idx} className={`hover:bg-slate-50 transition-colors ${mappedFile.selectedStudentId ? 'bg-green-50/20' : 'bg-red-50/20'}`}>
+                      <td className="p-3">
                         <div className="flex items-center gap-3">
-                          {file.isMatched ? (
-                            <CheckCircle className="text-green-500 w-5 h-5" />
+                          {mappedFile.fileType === 'pdf' ? (
+                            <FileText className="w-8 h-8 text-red-500 bg-red-50 p-1 rounded" />
                           ) : (
-                            <AlertCircle className="text-yellow-500 w-5 h-5" />
+                            <ImageIcon className="w-8 h-8 text-blue-500 bg-blue-50 p-1 rounded" />
                           )}
-                          <div>
-                            <p className="font-bold text-sm">{file.file.name}</p>
-                            <p className={`text-xs ${file.isMatched ? 'text-green-600' : 'text-yellow-600'}`}>
-                              الرقم المستخرج: {file.studentId || 'لا يوجد'} - الطالب: {file.studentName}
-                            </p>
+                          <div className="flex flex-col max-w-[200px]">
+                            <span className="font-bold text-sm truncate" title={mappedFile.file.name}>
+                              {mappedFile.file.name}
+                            </span>
+                            <span className="text-xs text-slate-500">{(mappedFile.file.size / 1024 / 1024).toFixed(2)} MB</span>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2 relative">
+                          {mappedFile.selectedStudentId ? (
+                            <CheckCircle className="w-5 h-5 text-green-500 absolute right-3 pointer-events-none" />
+                          ) : (
+                            <AlertCircle className="w-5 h-5 text-red-400 absolute right-3 pointer-events-none" />
+                          )}
+                          <select
+                            className={`w-full p-2 pr-10 border rounded-md outline-none focus:ring-2 focus:ring-blue-500 ${
+                              mappedFile.selectedStudentId ? 'border-green-300 bg-green-50/30 font-bold text-green-800' : 'border-red-300 bg-red-50/50'
+                            }`}
+                            value={mappedFile.selectedStudentId}
+                            onChange={(e) => handleStudentSelect(idx, e.target.value)}
+                          >
+                            <option value="" disabled>-- الرجاء تحديد صاحب هذه الورقة --</option>
+                            {classStudentsList.map(s => (
+                              <option key={s.id} value={s.id}>{s.name} (رقم: {s.id})</option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="p-3 text-center">
+                        <Button variant="ghost" size="sm" onClick={() => removeFile(idx)} className="text-red-500 hover:bg-red-50">
+                          إزالة
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            <div className="p-4 bg-slate-50 border-t flex justify-end">
               <Button 
-                onClick={handleBulkSubmit} 
-                className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
-                disabled={bulkFiles.length === 0}
+                onClick={handleSubmitMappedFiles} 
+                className="h-12 px-8 text-lg font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                disabled={filesToMap.filter(f => f.selectedStudentId !== '').length === 0}
               >
                 <Plus className="w-5 h-5 ml-2" />
-                تأكيد ورفع جميع الأوراق المطابقة
+                اعتماد الأوراق المرتبطة والبدء بالتصحيح
               </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="single">
-          <Card>
-            <CardHeader>
-              <CardTitle>الرفع الفردي</CardTitle>
-            </CardHeader>
-            <CardContent>
-               <div className="text-center py-12 text-gray-500 border border-dashed rounded-lg">
-                  <p>تم إيقاف هذه الميزة مؤقتاً لتفعيل الرفع الجماعي الذكي.</p>
-                  <p>يرجى استخدام التبويب الخاص بـ "الرفع الجماعي".</p>
-               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
