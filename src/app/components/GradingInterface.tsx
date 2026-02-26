@@ -8,6 +8,7 @@ import { Badge } from './ui/badge';
 import { getPapers, savePapers } from '../utils/storage'; // <-- أضفنا savePapers هنا
 import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
+import { Label } from './ui/label';
 
 // مكتبات الـ PDF
 import { Document, Page, pdfjs } from 'react-pdf';
