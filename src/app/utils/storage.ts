@@ -1,6 +1,12 @@
-// أدوات التخزين المحلي لإدارة بيانات الاختبارات
-
+import localforage from 'localforage';
 import { ExamPaper, GradingSession, MarkDistribution } from '../types/exam';
+
+// تهيئة المستودع العملاق
+localforage.config({
+  name: 'FastGraderDB',
+  storeName: 'exam_data', // اسم قاعدة البيانات
+  description: 'قاعدة بيانات تخزين أوراق الاختبارات محلياً'
+});
 
 const STORAGE_KEYS = {
   PAPERS: 'exam_papers',
@@ -8,206 +14,79 @@ const STORAGE_KEYS = {
   MARK_DISTRIBUTIONS: 'mark_distributions',
 };
 
-// إدارة الأوراق (Papers)
-export const savePapers = (papers: ExamPaper[]): void => {
-  localStorage.setItem(STORAGE_KEYS.PAPERS, JSON.stringify(papers));
+// ------------------------------------
+// 1. إدارة الأوراق (تغيرت لتصبح Async)
+// ------------------------------------
+export const savePapers = async (papers: ExamPaper[]): Promise<void> => {
+  await localforage.setItem(STORAGE_KEYS.PAPERS, papers);
 };
 
-export const getPapers = (): ExamPaper[] => {
-  const data = localStorage.getItem(STORAGE_KEYS.PAPERS);
-  return data ? JSON.parse(data) : [];
+export const getPapers = async (): Promise<ExamPaper[]> => {
+  const data = await localforage.getItem<ExamPaper[]>(STORAGE_KEYS.PAPERS);
+  return data || [];
 };
 
-export const addPaper = (paper: ExamPaper): void => {
-  const papers = getPapers();
+export const addPaper = async (paper: ExamPaper): Promise<void> => {
+  const papers = await getPapers();
   papers.push(paper);
-  savePapers(papers);
+  await savePapers(papers);
 };
 
-export const updatePaper = (paperId: string, updates: Partial<ExamPaper>): void => {
-  const papers = getPapers();
+export const updatePaper = async (paperId: string, updates: Partial<ExamPaper>): Promise<void> => {
+  const papers = await getPapers();
   const index = papers.findIndex(p => p.id === paperId);
   if (index !== -1) {
     papers[index] = { ...papers[index], ...updates };
-    savePapers(papers);
+    await savePapers(papers);
   }
 };
 
-export const deletePaper = (paperId: string): void => {
-  const papers = getPapers();
+export const deletePaper = async (paperId: string): Promise<void> => {
+  const papers = await getPapers();
   const filtered = papers.filter(p => p.id !== paperId);
-  savePapers(filtered);
+  await savePapers(filtered);
 };
 
-// إدارة جلسة التصحيح (Grading Session)
-export const saveGradingSession = (session: GradingSession): void => {
-  localStorage.setItem(STORAGE_KEYS.GRADING_SESSION, JSON.stringify(session));
+// ------------------------------------
+// 2. إدارة جلسة التصحيح
+// ------------------------------------
+export const saveGradingSession = async (session: GradingSession): Promise<void> => {
+  await localforage.setItem(STORAGE_KEYS.GRADING_SESSION, session);
 };
 
-export const getGradingSession = (): GradingSession | null => {
-  const data = localStorage.getItem(STORAGE_KEYS.GRADING_SESSION);
-  return data ? JSON.parse(data) : null;
+export const getGradingSession = async (): Promise<GradingSession | null> => {
+  const data = await localforage.getItem<GradingSession>(STORAGE_KEYS.GRADING_SESSION);
+  return data || null;
 };
 
-export const clearGradingSession = (): void => {
-  localStorage.removeItem(STORAGE_KEYS.GRADING_SESSION);
+export const clearGradingSession = async (): Promise<void> => {
+  await localforage.removeItem(STORAGE_KEYS.GRADING_SESSION);
 };
 
-// إدارة توزيع الدرجات (Mark Distributions)
-export const saveMarkDistributions = (distributions: MarkDistribution[]): void => {
-  localStorage.setItem(STORAGE_KEYS.MARK_DISTRIBUTIONS, JSON.stringify(distributions));
+// ------------------------------------
+// 3. إدارة توزيع الدرجات
+// ------------------------------------
+export const saveMarkDistributions = async (distributions: MarkDistribution[]): Promise<void> => {
+  await localforage.setItem(STORAGE_KEYS.MARK_DISTRIBUTIONS, distributions);
 };
 
-export const getMarkDistributions = (): MarkDistribution[] => {
-  const data = localStorage.getItem(STORAGE_KEYS.MARK_DISTRIBUTIONS);
-  return data ? JSON.parse(data) : [];
+export const getMarkDistributions = async (): Promise<MarkDistribution[]> => {
+  const data = await localforage.getItem<MarkDistribution[]>(STORAGE_KEYS.MARK_DISTRIBUTIONS);
+  return data || [];
 };
 
-export const addMarkDistribution = (distribution: MarkDistribution): void => {
-  const distributions = getMarkDistributions();
+export const addMarkDistribution = async (distribution: MarkDistribution): Promise<void> => {
+  const distributions = await getMarkDistributions();
   const index = distributions.findIndex(d => d.examName === distribution.examName);
   if (index !== -1) {
     distributions[index] = distribution;
   } else {
     distributions.push(distribution);
   }
-  saveMarkDistributions(distributions);
+  await saveMarkDistributions(distributions);
 };
 
-export const getMarkDistributionByExam = (examName: string): MarkDistribution | undefined => {
-  const distributions = getMarkDistributions();
+export const getMarkDistributionByExam = async (examName: string): Promise<MarkDistribution | undefined> => {
+  const distributions = await getMarkDistributions();
   return distributions.find(d => d.examName === examName);
-};
-
-// تهيئة البيانات التجريبية بالعربية إذا كان التخزين فارغاً
-export const initializeSampleData = (): void => {
-  const papers = getPapers();
-  if (papers.length === 0) {
-    const samplePapers: ExamPaper[] = [
-      {
-        id: 'paper-001',
-        studentName: 'أحمد المنصور', // تعريب الاسم
-        studentId: '2024001',
-        examName: 'اختبار منتصف الفصل - رياضيات', // تعريب المادة
-        pdfUrl: 'sample-pdf-1',
-        uploadDate: '2026-02-20T10:00:00Z',
-        totalMaxScore: 100,
-        status: 'pending',
-        questions: [
-          {
-            id: 'q1-paper-001',
-            paperId: 'paper-001',
-            questionNumber: 1,
-            totalMaxScore: 30,
-            parts: [
-              {
-                id: 'p1-q1-paper-001',
-                questionId: 'q1-paper-001',
-                paperId: 'paper-001',
-                partNumber: 1,
-                imageUrl: 'sample-image-1',
-                maxScore: 10,
-              },
-              {
-                id: 'p2-q1-paper-001',
-                questionId: 'q1-paper-001',
-                paperId: 'paper-001',
-                partNumber: 2,
-                imageUrl: 'sample-image-2',
-                maxScore: 10,
-              },
-              {
-                id: 'p3-q1-paper-001',
-                questionId: 'q1-paper-001',
-                paperId: 'paper-001',
-                partNumber: 3,
-                imageUrl: 'sample-image-3',
-                maxScore: 10,
-              },
-            ],
-          },
-          {
-            id: 'q2-paper-001',
-            paperId: 'paper-001',
-            questionNumber: 2,
-            totalMaxScore: 40,
-            parts: [
-              {
-                id: 'p1-q2-paper-001',
-                questionId: 'q2-paper-001',
-                paperId: 'paper-001',
-                partNumber: 1,
-                imageUrl: 'sample-image-4',
-                maxScore: 20,
-              },
-              {
-                id: 'p2-q2-paper-001',
-                questionId: 'q2-paper-001',
-                paperId: 'paper-001',
-                partNumber: 2,
-                imageUrl: 'sample-image-5',
-                maxScore: 20,
-              },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'paper-002',
-        studentName: 'سارة العامري', // تعريب الاسم
-        studentId: '2024002',
-        examName: 'اختبار منتصف الفصل - رياضيات',
-        pdfUrl: 'sample-pdf-2',
-        uploadDate: '2026-02-20T10:05:00Z',
-        totalMaxScore: 100,
-        status: 'pending',
-        questions: [
-          {
-            id: 'q1-paper-002',
-            paperId: 'paper-002',
-            questionNumber: 1,
-            totalMaxScore: 30,
-            parts: [
-              {
-                id: 'p1-q1-paper-002',
-                questionId: 'q1-paper-002',
-                paperId: 'paper-002',
-                partNumber: 1,
-                imageUrl: 'sample-image-7',
-                maxScore: 10,
-              },
-            ],
-          },
-        ],
-      },
-    ];
-    savePapers(samplePapers);
-
-    // نموذج توزيع درجات تجريبي بالعربية
-    const sampleDistribution: MarkDistribution = {
-      examName: 'اختبار منتصف الفصل - رياضيات',
-      questions: [
-        {
-          questionNumber: 1,
-          parts: [
-            { partNumber: 1, maxScore: 10 },
-            { partNumber: 2, maxScore: 10 },
-            { partNumber: 3, maxScore: 10 },
-          ],
-        },
-        {
-          questionNumber: 2,
-          parts: [
-            { partNumber: 1, maxScore: 20 },
-            { partNumber: 2, maxScore: 20 },
-          ],
-        },
-        {
-          questionNumber: 3,
-          parts: [{ partNumber: 1, maxScore: 30 }],
-        },
-      ],
-    };
-    addMarkDistribution(sampleDistribution);
-  }
 };
