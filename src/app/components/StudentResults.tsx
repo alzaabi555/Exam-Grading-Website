@@ -17,10 +17,18 @@ export function StudentResults() {
   const [paper, setPaper] = useState<ExamPaper | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
+  // تم تحويل الجلب هنا ليدعم المستودع العملاق (Async/Await)
   useEffect(() => {
-    const papers = getPapers();
-    const foundPaper = papers.find(p => p.id === paperId);
-    setPaper(foundPaper || null);
+    const fetchPaperData = async () => {
+      try {
+        const papers = await getPapers();
+        const foundPaper = papers.find(p => p.id === paperId);
+        setPaper(foundPaper || null);
+      } catch (error) {
+        console.error("حدث خطأ أثناء جلب الورقة:", error);
+      }
+    };
+    fetchPaperData();
   }, [paperId]);
 
   if (!paper) {
@@ -28,7 +36,7 @@ export function StudentResults() {
       <div className="container mx-auto p-6 max-w-4xl text-right" dir="rtl">
         <Card>
           <CardContent className="p-12 text-center">
-            <h2 className="text-2xl mb-4 font-bold">ورقة الاختبار غير موجودة</h2>
+            <h2 className="text-2xl mb-4 font-bold">ورقة الاختبار غير موجودة أو جاري تحميلها...</h2>
             <Button onClick={() => navigate('/dashboard')}>العودة للوحة التحكم</Button>
           </CardContent>
         </Card>
@@ -68,6 +76,7 @@ export function StudentResults() {
     toast.info('جاري تجهيز الورقة المصححة...');
 
     try {
+      // الـ Fetch يستطيع قراءة نصوص Base64 المخزنة في المستودع بشكل ممتاز
       const fileBytes = await fetch(paper.pdfUrl).then(res => res.arrayBuffer());
       let pdfDoc;
       let page;
