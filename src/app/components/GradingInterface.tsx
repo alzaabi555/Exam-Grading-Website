@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { getPapers, savePapers } from '../utils/storage'; // <-- أضفنا savePapers هنا
+import { getPapers, savePapers } from '../utils/storage';
 import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
 import { Label } from './ui/label';
@@ -30,6 +30,17 @@ interface Annotation {
   partId?: string;
 }
 
+// دالة فك التشفير السحرية لبيئة Electron
+const dataUrlToArrayBuffer = (dataUrl: string) => {
+  const base64 = dataUrl.split(',')[1];
+  const binaryString = window.atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
 export function GradingInterface() {
   const navigate = useNavigate();
   const [currentPaper, setCurrentPaper] = useState<ExamPaper | null>(null);
@@ -48,14 +59,13 @@ export function GradingInterface() {
     loadNextPaper();
   }, []);
 
-  // تحويل الدالة إلى async لتتوافق مع المستودع العملاق
   const loadNextPaper = async () => {
     const papers = await getPapers();
     const pendingPaper = papers.find(p => p.status !== 'completed');
     if (pendingPaper) {
       setCurrentPaper(pendingPaper);
       setScores({});
-      setAnnotations(pendingPaper.annotations || []); // سحب العلامات القديمة إن وجدت
+      setAnnotations(pendingPaper.annotations || []);
       setCurrentPage(1);
       if (pendingPaper.questions.length > 0 && pendingPaper.questions[0].parts.length > 0) {
         setActivePartId(pendingPaper.questions[0].parts[0].id);
@@ -96,7 +106,6 @@ export function GradingInterface() {
     return Object.values(scores).reduce((sum, score) => sum + score, 0);
   };
 
-  // تحويل الدالة إلى async واستخدام savePapers
   const saveProgress = async (isComplete: boolean = false) => {
     if (!currentPaper) return;
     const papers = await getPapers();
@@ -108,10 +117,9 @@ export function GradingInterface() {
         totalScore: calculateTotal(),
         status: isComplete ? 'completed' : 'in-progress',
         gradedDate: isComplete ? new Date().toISOString() : undefined,
-        annotations, // حفظ الحبر الأحمر
+        annotations, 
       };
       
-      // حفظ البيانات في المستودع العملاق بدلاً من localStorage
       await savePapers(papers);
 
       if (isComplete) {
@@ -177,7 +185,6 @@ export function GradingInterface() {
     setAnnotations(annotations.filter(a => a.id !== id));
   };
 
-  // التصدير الذكي (يدعم الصور والـ PDF)
   const exportGradedPdf = async () => {
     if (!currentPaper || !currentPaper.pdfUrl) {
       toast.error('ملف الاختبار غير موجود!');
@@ -188,7 +195,8 @@ export function GradingInterface() {
     toast.info('جاري دمج العلامات وتجهيز الملف للطباعة...');
 
     try {
-      const fileBytes = await fetch(currentPaper.pdfUrl).then(res => res.arrayBuffer());
+      // 1. استخدام دالة فك التشفير بدلاً من fetch
+      const fileBytes = dataUrlToArrayBuffer(currentPaper.pdfUrl);
       let pdfDoc;
       let page;
       let width, height;
@@ -282,7 +290,6 @@ export function GradingInterface() {
   return (
     <div className="flex h-[calc(100vh-80px)] overflow-hidden bg-slate-100" dir="rtl">
       
-      {/* العمود الأيمن (لوحة الرصد) */}
       <div className="w-[380px] min-w-[350px] bg-white border-l shadow-2xl flex flex-col z-10">
         <div className="p-4 border-b bg-blue-50/50">
           <div className="flex justify-between items-center mb-3">
@@ -340,7 +347,6 @@ export function GradingInterface() {
           ))}
         </div>
 
-        {/* أزرار الحفظ والطباعة */}
         <div className="p-4 border-t bg-slate-50 space-y-3">
           <div className="flex justify-between p-3 bg-white rounded-lg border font-bold text-lg">
             <span>المجموع:</span>
@@ -367,14 +373,13 @@ export function GradingInterface() {
         </div>
       </div>
 
-      {/* العمود الأيسر (منطقة العرض التفاعلية) */}
       <div className="flex-1 p-4 h-full bg-slate-200 flex flex-col overflow-hidden">
         <div className="bg-white p-2 mb-2 rounded-lg shadow-sm border border-slate-300 flex items-center justify-center gap-4">
           <span className="text-sm font-bold text-slate-500">القلم الحالي:</span>
           
           <Button 
             variant={activeTool === 'check' ? 'default' : 'outline'}
-            className={activeTool === 'check' ? 'bg-green-600' : ''}
+            className={activeTool === 'check' ? 'bg-green-600 text-white hover:bg-green-700' : ''}
             onClick={() => setActiveTool('check')}
           >
             <Check className="w-5 h-5 ml-2" /> (صح) درجة كاملة
@@ -382,7 +387,7 @@ export function GradingInterface() {
 
           <Button 
             variant={activeTool === 'cross' ? 'default' : 'outline'}
-            className={activeTool === 'cross' ? 'bg-red-600' : ''}
+            className={activeTool === 'cross' ? 'bg-red-600 text-white hover:bg-red-700' : ''}
             onClick={() => setActiveTool('cross')}
           >
             <X className="w-5 h-5 ml-2" /> (خطأ) صفر
@@ -390,7 +395,7 @@ export function GradingInterface() {
 
           <Button 
             variant={activeTool === 'score' ? 'default' : 'outline'}
-            className={activeTool === 'score' ? 'bg-blue-600' : ''}
+            className={activeTool === 'score' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
             onClick={() => setActiveTool('score')}
           >
             <Type className="w-5 h-5 ml-2" /> درجة مخصصة
@@ -418,7 +423,6 @@ export function GradingInterface() {
                 </Document>
               )}
 
-              {/* طبقة الأختام التفاعلية */}
               {annotations.map(ann => (
                 <div 
                   key={ann.id}
