@@ -5,11 +5,22 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Progress } from './ui/progress';
-import { Separator } from './ui/separator';
+import { Badge } from './ui/badge'; // <-- تم إضافة الاستدعاء المفقود هنا
 import { getPapers } from '../utils/storage';
 import { ExamPaper } from '../types/exam';
 import { toast } from 'sonner';
 import { PDFDocument, rgb } from 'pdf-lib';
+
+// دالة فك التشفير السحرية
+const dataUrlToArrayBuffer = (dataUrl: string) => {
+  const base64 = dataUrl.split(',')[1];
+  const binaryString = window.atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
 
 export function StudentResults() {
   const { paperId } = useParams();
@@ -17,7 +28,6 @@ export function StudentResults() {
   const [paper, setPaper] = useState<ExamPaper | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
-  // تم تحويل الجلب هنا ليدعم المستودع العملاق (Async/Await)
   useEffect(() => {
     const fetchPaperData = async () => {
       try {
@@ -60,12 +70,11 @@ export function StudentResults() {
 
   const gradeInfo = getGrade(percentage);
 
-  // دالة طباعة التقرير (الشهادة)
   const handlePrintReport = () => {
     window.print();
   };
 
-  // دالة تحميل ورقة الاختبار الأصلية مع الأختام
+  // زر التنزيل المعدل
   const handleDownloadPaper = async () => {
     if (!paper.pdfUrl) {
       toast.error('ملف الاختبار غير موجود!');
@@ -76,8 +85,8 @@ export function StudentResults() {
     toast.info('جاري تجهيز الورقة المصححة...');
 
     try {
-      // الـ Fetch يستطيع قراءة نصوص Base64 المخزنة في المستودع بشكل ممتاز
-      const fileBytes = await fetch(paper.pdfUrl).then(res => res.arrayBuffer());
+      // استخدام دالة فك التشفير بدلاً من fetch
+      const fileBytes = dataUrlToArrayBuffer(paper.pdfUrl);
       let pdfDoc;
       let page;
       let width, height;
@@ -99,7 +108,6 @@ export function StudentResults() {
         width = size.width; height = size.height;
       }
 
-      // رسم العلامات إذا كانت محفوظة
       if (paper.annotations && paper.annotations.length > 0) {
         for (const ann of paper.annotations) {
           const xPos = (ann.x / 100) * width;
@@ -115,7 +123,6 @@ export function StudentResults() {
         }
       }
 
-      // رسم المجموع النهائي
       page.drawText(`المجموع: ${paper.totalScore} / ${paper.totalMaxScore}`, {
         x: 40, y: height - 50, size: 24, color: rgb(0.8, 0.1, 0.1),
       });
@@ -142,8 +149,6 @@ export function StudentResults() {
 
   return (
     <div className="container mx-auto p-4 md:p-8 max-w-5xl text-right font-sans" dir="rtl">
-      
-      {/* شريط الأزرار (يختفي عند الطباعة) */}
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4 print:hidden bg-white p-4 rounded-lg shadow-sm border">
         <Button variant="ghost" onClick={() => navigate('/dashboard')} className="text-slate-600">
           <ArrowRight className="w-4 h-4 ml-2" />
@@ -161,17 +166,13 @@ export function StudentResults() {
         </div>
       </div>
 
-      {/* --- بداية المنطقة المخصصة للطباعة (الشهادة) --- */}
       <div className="bg-white p-8 md:p-12 rounded-xl shadow-lg border-4 border-double border-slate-200 print:shadow-none print:border-none print:p-0">
-        
-        {/* الترويسة الرسمية */}
         <div className="text-center mb-10 pb-6 border-b-2 border-slate-100">
           <Award className="w-16 h-16 mx-auto text-blue-600 mb-4" />
           <h1 className="text-3xl font-black text-slate-800 mb-2">تقرير نتيجة اختبار تفصيلي</h1>
           <p className="text-slate-500 font-medium">مستخرج آلياً من نظام المصحح السريع</p>
         </div>
 
-        {/* معلومات الطالب */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10 bg-slate-50 p-6 rounded-lg border border-slate-100 print:bg-transparent print:border-b">
           <div>
             <p className="text-sm text-slate-500 mb-1">اسم الطالب</p>
@@ -193,7 +194,6 @@ export function StudentResults() {
           </div>
         </div>
 
-        {/* ملخص الدرجات (البطاقات) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
           <Card className="border-t-4 border-t-blue-500 shadow-sm print:shadow-none">
             <CardContent className="p-6 text-center">
@@ -222,7 +222,6 @@ export function StudentResults() {
           </Card>
         </div>
 
-        {/* شريط التقدم */}
         <div className="mb-10 bg-slate-50 p-6 rounded-lg border border-slate-100 print:hidden">
           <div className="flex justify-between text-sm font-bold text-slate-700 mb-3">
             <span>مؤشر الأداء العام</span>
@@ -231,7 +230,6 @@ export function StudentResults() {
           <Progress value={percentage} className="h-4 bg-slate-200" />
         </div>
 
-        {/* تفاصيل الأسئلة */}
         <div>
           <h3 className="text-2xl font-bold text-slate-800 mb-6 border-b pb-2 inline-block">تحليل الأداء التفصيلي:</h3>
           <div className="space-y-8">
@@ -306,7 +304,6 @@ export function StudentResults() {
           </div>
         </div>
 
-        {/* تذييل الشهادة */}
         <div className="mt-16 pt-6 border-t border-slate-200 flex justify-between items-center text-sm text-slate-500 print:mt-10">
           <div className="flex items-center gap-2">
             <FileText className="w-4 h-4" />
